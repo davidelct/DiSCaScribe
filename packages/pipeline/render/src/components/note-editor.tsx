@@ -6,9 +6,10 @@ import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
 import { Badge } from "@ui/lib/ui/badge"
 import { ScrollArea } from "@ui/lib/ui/scroll-area"
-import { Save, Copy, Download, Check, AlertTriangle, Send, X, MessageSquare, Loader2 } from "lucide-react"
+import { Save, Copy, Download, Check, AlertTriangle, Send, X, MessageSquare, Loader2, Pencil } from "lucide-react"
 import { format } from "date-fns"
 import { cn } from "@ui/lib/utils"
+import { MarkdownNote } from "./markdown-note"
 
 const VISIT_TYPE_LABELS: Record<string, string> = {
   history_physical: "History & Physical",
@@ -52,6 +53,7 @@ function messageId() {
 
 export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
   const [activeTab, setActiveTab] = useState<TabType>("note")
+  const [noteMode, setNoteMode] = useState<"preview" | "edit">("preview")
   const [noteMarkdown, setNoteMarkdown] = useState<string>(encounter.note_text || "")
   const [hasChanges, setHasChanges] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -69,6 +71,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
 
   useEffect(() => {
     setNoteMarkdown(encounter.note_text || "")
+    setNoteMode("preview")
     setHasChanges(false)
     setOpenClawPanelOpen(false)
     setOpenClawInitState("idle")
@@ -371,6 +374,24 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
             </div>
 
             <div className="flex items-center gap-1 pb-2">
+              {activeTab === "note" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setNoteMode((m) => (m === "edit" ? "preview" : "edit"))}
+                  aria-pressed={noteMode === "edit"}
+                  title={noteMode === "edit" ? "Switch to formatted view" : "Edit raw markdown"}
+                  className={cn(
+                    "mr-1 h-8 rounded-full px-3",
+                    noteMode === "edit"
+                      ? "bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong hover:text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                  <span className="text-xs">Edit</span>
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -436,12 +457,18 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
           <div className="mx-auto w-full max-w-3xl px-8 py-10">
             {activeTab === "note" ? (
               <>
-                <Textarea
-                  value={noteMarkdown}
-                  onChange={(e) => handleNoteChange(e.target.value)}
-                  placeholder="Clinical note markdown…"
-                  className="min-h-[640px] resize-none rounded-2xl border-border bg-card p-6 font-mono text-sm leading-relaxed text-foreground shadow-soft focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
-                />
+                {noteMode === "preview" ? (
+                  <div className="min-h-[640px] rounded-2xl border border-border bg-card p-8 shadow-soft sm:p-10">
+                    <MarkdownNote source={noteMarkdown} />
+                  </div>
+                ) : (
+                  <Textarea
+                    value={noteMarkdown}
+                    onChange={(e) => handleNoteChange(e.target.value)}
+                    placeholder="Clinical note markdown…"
+                    className="min-h-[640px] resize-none rounded-2xl border-border bg-card p-6 font-mono text-sm leading-relaxed text-foreground shadow-soft focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+                  />
+                )}
                 {openClawError && openClawInitState === "failed" && (
                   <div className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
