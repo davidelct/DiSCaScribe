@@ -33,12 +33,15 @@ export function NewEncounterForm({ onStart, onCancel }: NewEncounterFormProps) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm">
-      <h2 className="text-xl font-medium text-foreground mb-6 text-center">New Interview</h2>
+    <div className="animate-fade-up mx-auto w-full max-w-md rounded-3xl border border-border bg-card p-8 shadow-lifted surface">
+      <div className="mb-7 text-center">
+        <h2 className="font-display text-2xl font-medium tracking-tight text-foreground">New Interview</h2>
+        <p className="mt-1.5 text-sm text-muted-foreground">A few details before we begin recording.</p>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="space-y-2">
-          <Label htmlFor="patient-name" className="text-sm text-muted-foreground">
+          <Label htmlFor="patient-name" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Patient Name
           </Label>
           <Input
@@ -46,19 +49,19 @@ export function NewEncounterForm({ onStart, onCancel }: NewEncounterFormProps) {
             placeholder="Enter patient name (optional)"
             value={patientName}
             onChange={(e) => setPatientName(e.target.value)}
-            className="rounded-xl border-border bg-secondary"
+            className="h-11 rounded-xl border-border bg-background"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="visit-type" className="text-sm text-muted-foreground">
+          <Label htmlFor="visit-type" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Note Type
           </Label>
           <select
             id="visit-type"
             value={visitType}
             onChange={(e) => setVisitType(e.target.value)}
-            className="w-full rounded-xl border border-border bg-secondary px-4 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-11 w-full rounded-xl border border-border bg-background px-4 text-sm text-foreground transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           >
             {VISIT_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -68,7 +71,7 @@ export function NewEncounterForm({ onStart, onCancel }: NewEncounterFormProps) {
           </select>
         </div>
 
-        <div className="flex gap-3 pt-4">
+        <div className="flex gap-3 pt-3">
           <Button
             type="button"
             variant="ghost"
@@ -77,7 +80,10 @@ export function NewEncounterForm({ onStart, onCancel }: NewEncounterFormProps) {
           >
             Cancel
           </Button>
-          <Button type="submit" className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90">
+          <Button
+            type="submit"
+            className="flex-1 rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
+          >
             <Mic className="mr-2 h-4 w-4" />
             Start Recording
           </Button>

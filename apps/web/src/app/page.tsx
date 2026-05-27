@@ -1042,7 +1042,7 @@ function HomePageContent() {
         }
       }
       if (useLocalBackend && localBackendRef.current) {
-        const sessionName = `OpenScribe ${encounter.id}`
+        const sessionName = `DiSCaScribe ${encounter.id}`
         localSessionNameRef.current = sessionName
         setLocalDurationMs(0)
         setLocalPaused(false)
@@ -1580,9 +1580,9 @@ function HomePageContent() {
         }}
       />
       {showMixedKeyPrompt && processingMode === "mixed" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-foreground">Anthropic Key Required for Mixed Mode</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
+            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Anthropic Key Required for Mixed Mode</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               Mixed mode uses Claude for note generation. Add your Anthropic key in Settings, or switch to local-only mode.
             </p>
@@ -1600,7 +1600,7 @@ function HomePageContent() {
               <button
                 type="button"
                 disabled={!localBackendAvailable}
-                className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={async () => {
                   if (!localBackendAvailable) return
                   const switched = await handleProcessingModeChange("local")
@@ -1617,9 +1617,9 @@ function HomePageContent() {
         </div>
       )}
       {showMixedRuntimePrompt && processingMode === "mixed" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-foreground">Mixed Mode Not Ready</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
+            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Mixed Mode Not Ready</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               {mixedRuntimePromptMessage || "Whisper runtime is not ready yet."}
             </p>
@@ -1641,7 +1641,7 @@ function HomePageContent() {
               </button>
               <button
                 type="button"
-                className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong"
                 onClick={() => {
                   setShowMixedRuntimePrompt(false)
                   setShowSettingsDialog(true)
@@ -1654,9 +1654,9 @@ function HomePageContent() {
         </div>
       )}
       {showLocalRuntimePrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
-            <h3 className="text-lg font-semibold text-foreground">Local Mode Not Ready</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
+            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Local Mode Not Ready</h3>
             <p className="mt-2 text-sm text-muted-foreground">
               {localRuntimePromptMessage || "Local runtime checks failed."}
             </p>
@@ -1676,7 +1676,7 @@ function HomePageContent() {
               </button>
               <button
                 type="button"
-                className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong"
                 onClick={async () => {
                   setShowLocalRuntimePrompt(false)
                   await handleProcessingModeChange("mixed")
@@ -1698,7 +1698,7 @@ function HomePageContent() {
         </div>
       )}
       <div className="flex h-screen w-screen overflow-hidden bg-background">
-        <div className="flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar">
+        <div className="relative z-10 flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar shadow-soft">
           <EncounterList
             encounters={encounters}
             selectedId={view.type === "viewing" ? view.encounterId : null}

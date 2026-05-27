@@ -141,8 +141,8 @@ export function PermissionsDialog({ onComplete, preferredInputDeviceId }: Permis
 
   if (!initialCheckDone) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-        <div className="w-full max-w-xl rounded-2xl bg-background p-8 shadow-2xl border border-border">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+        <div className="animate-scale-in w-full max-w-xl rounded-3xl border border-border bg-card p-8 shadow-lifted surface">
           <div className="text-center">
             <p className="text-muted-foreground">Checking permissions...</p>
           </div>
@@ -152,36 +152,36 @@ export function PermissionsDialog({ onComplete, preferredInputDeviceId }: Permis
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-2xl bg-background p-8 shadow-2xl border border-border">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+      <div className="animate-scale-in w-full max-w-xl rounded-3xl border border-border bg-card p-8 shadow-lifted surface">
         <div className="mb-6">
-          <p className="mb-2 text-sm font-medium uppercase tracking-wide text-emerald-600">PERMISSIONS</p>
-          <h2 className="text-2xl font-bold text-foreground">
-            Allow the OpenScribe to capture clinical encounters
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">Permissions</p>
+          <h2 className="font-display text-2xl font-medium tracking-tight text-foreground text-balance">
+            Allow DiSCaScribe to capture clinical encounters
           </h2>
           <p className="mt-3 text-sm text-muted-foreground">
             The scribe records audio directly from your device. Activation only when you enable it.
           </p>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <div className="space-y-3 rounded-2xl border border-border bg-background p-4">
           {/* Microphone Permission */}
           <div className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-accent/50">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-                <Mic className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-soft">
+                <Mic className="h-5 w-5 text-primary" />
               </div>
               <span className="font-medium text-foreground">Transcribe my voice</span>
             </div>
             {microphoneGranted ? (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-                <Check className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft">
+                <Check className="h-5 w-5 text-primary" />
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Button
                   onClick={handleEnableMicrophone}
-                  className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                  className="rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
                   size="sm"
                 >
                   <Mic className="mr-2 h-4 w-4" />
@@ -205,19 +205,19 @@ export function PermissionsDialog({ onComplete, preferredInputDeviceId }: Permis
           {/* Screen Recording Permission */}
           <div className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-accent/50">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-                <Monitor className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-soft">
+                <Monitor className="h-5 w-5 text-primary" />
               </div>
               <span className="font-medium text-foreground">Transcribe other people&apos;s voices (optional)</span>
             </div>
             {screenGranted ? (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
-                <Check className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft">
+                <Check className="h-5 w-5 text-primary" />
               </div>
             ) : (
               <Button
                 onClick={handleEnableScreenRecording}
-                className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                className="rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
                 size="sm"
               >
                 <Monitor className="mr-2 h-4 w-4" />
@@ -231,7 +231,7 @@ export function PermissionsDialog({ onComplete, preferredInputDeviceId }: Permis
           <Button
             onClick={onComplete}
             disabled={!canContinue}
-            className="rounded-full bg-foreground px-6 text-background hover:bg-foreground/90 disabled:opacity-40"
+            className="rounded-full bg-primary px-6 text-primary-foreground shadow-soft hover:bg-brand-strong disabled:opacity-40"
           >
             Continue
           </Button>

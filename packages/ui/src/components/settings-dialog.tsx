@@ -111,11 +111,11 @@ export function SettingsDialog({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl bg-background p-8 shadow-2xl border border-border max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+      <div className="animate-scale-in max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-border bg-card p-8 shadow-lifted surface">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-foreground">Settings</h2>
+          <h2 className="font-display text-2xl font-medium tracking-tight text-foreground">Settings</h2>
           <Button
             variant="ghost"
             size="sm"
@@ -138,10 +138,10 @@ export function SettingsDialog({
             <div className="flex gap-3">
               <button
                 onClick={() => onNoteLengthChange("short")}
-                className={`flex-1 rounded-lg border-2 p-4 text-left transition-all ${
+                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
                   noteLength === "short"
-                    ? "border-foreground bg-accent"
-                    : "border-border hover:border-muted-foreground"
+                    ? "border-primary bg-brand-soft/60"
+                    : "border-border hover:border-primary/40"
                 }`}
               >
                 <div className="font-medium text-foreground">Short</div>
@@ -151,10 +151,10 @@ export function SettingsDialog({
               </button>
               <button
                 onClick={() => onNoteLengthChange("long")}
-                className={`flex-1 rounded-lg border-2 p-4 text-left transition-all ${
+                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
                   noteLength === "long"
-                    ? "border-foreground bg-accent"
-                    : "border-border hover:border-muted-foreground"
+                    ? "border-primary bg-brand-soft/60"
+                    : "border-border hover:border-primary/40"
                 }`}
               >
                 <div className="font-medium text-foreground">Long</div>
@@ -177,10 +177,10 @@ export function SettingsDialog({
             <div className="flex gap-3">
               <button
                 onClick={() => onProcessingModeChange("mixed")}
-                className={`flex-1 rounded-lg border-2 p-4 text-left transition-all ${
+                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
                   processingMode === "mixed"
-                    ? "border-foreground bg-accent"
-                    : "border-border hover:border-muted-foreground"
+                    ? "border-primary bg-brand-soft/60"
+                    : "border-border hover:border-primary/40"
                 }`}
               >
                 <div className="font-medium text-foreground">Mixed (Default)</div>
@@ -191,10 +191,10 @@ export function SettingsDialog({
               <button
                 onClick={() => onProcessingModeChange("local")}
                 disabled={!localBackendAvailable}
-                className={`flex-1 rounded-lg border-2 p-4 text-left transition-all ${
+                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
                   processingMode === "local"
-                    ? "border-foreground bg-accent"
-                    : "border-border hover:border-muted-foreground"
+                    ? "border-primary bg-brand-soft/60"
+                    : "border-border hover:border-primary/40"
                 } ${!localBackendAvailable ? "cursor-not-allowed opacity-50" : ""}`}
               >
                 <div className="font-medium text-foreground">Local-only</div>
@@ -229,7 +229,7 @@ export function SettingsDialog({
                 value={anthropicApiKey}
                 onChange={(e) => onAnthropicApiKeyChange(e.target.value)}
                 placeholder="sk-ant-..."
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -256,7 +256,7 @@ export function SettingsDialog({
                 id="preferred-input-device"
                 value={preferredInputDeviceId || ""}
                 onChange={(e) => onPreferredInputDeviceChange(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
               >
                 <option value="">System default microphone</option>
                 {audioInputDevices.map((device) => (
@@ -302,7 +302,7 @@ export function SettingsDialog({
                 id="retention-days"
                 value={retentionDays}
                 onChange={(e) => setRetentionDays(Number(e.target.value))}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
               >
                 <option value="30">30 days</option>
                 <option value="90">90 days (recommended)</option>
@@ -326,7 +326,7 @@ export function SettingsDialog({
               <Button
                 variant="outline"
                 onClick={handlePurgeAuditLogs}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 Purge All Logs
               </Button>
@@ -336,7 +336,7 @@ export function SettingsDialog({
 
         {/* Save Message */}
         {saveMessage && (
-          <div className={`mt-4 text-sm text-center ${saveMessage.includes("success") ? "text-green-600" : "text-red-600"}`}>
+          <div className={`mt-4 text-center text-sm ${saveMessage.includes("success") ? "text-success" : "text-destructive"}`}>
             {saveMessage}
           </div>
         )}
@@ -353,7 +353,7 @@ export function SettingsDialog({
           <Button
             onClick={handleSave}
             disabled={isSaving}
-            className="rounded-full bg-foreground text-background hover:bg-foreground/90"
+            className="rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
           >
             {isSaving ? "Saving..." : "Save"}
           </Button>

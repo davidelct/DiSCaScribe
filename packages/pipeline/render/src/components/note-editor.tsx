@@ -260,7 +260,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
     }
 
     return [
-      "You are receiving a structured handoff from OpenScribe.",
+      "You are receiving a structured handoff from DiSCaScribe.",
       "Primary objective: execute the OpenEMR action for this encounter now.",
       "Action target: apply the note into OpenEMR for the current patient chart or create/update the current encounter note.",
       "If patient resolution is ambiguous, ask for confirmation before writing data.",
@@ -314,15 +314,17 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
   return (
     <>
       <div className="flex h-full flex-col">
-        <div className="shrink-0 border-b border-border bg-background px-8 py-5">
+        <div className="shrink-0 border-b border-border bg-card/60 px-8 py-5 backdrop-blur-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-medium text-foreground">{encounter.patient_name || "Unknown Patient"}</h2>
+                <h2 className="font-display text-2xl font-medium tracking-tight text-foreground">
+                  {encounter.patient_name || "Unknown Patient"}
+                </h2>
                 {encounter.patient_id && (
                   <Badge
                     variant="secondary"
-                    className="rounded-full font-mono text-xs bg-secondary text-muted-foreground"
+                    className="rounded-full border-transparent bg-brand-soft font-mono text-xs text-primary"
                   >
                     {encounter.patient_id}
                   </Badge>
@@ -348,7 +350,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                   "px-4 py-2 text-sm font-medium transition-colors",
                   "border-b-2 -mb-px",
                   activeTab === "note"
-                    ? "border-foreground text-foreground"
+                    ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -360,7 +362,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                   "px-4 py-2 text-sm font-medium transition-colors",
                   "border-b-2 -mb-px",
                   activeTab === "transcript"
-                    ? "border-foreground text-foreground"
+                    ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -418,7 +420,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                   onClick={handleSave}
                   disabled={!hasChanges}
                   className={cn(
-                    "ml-1 h-8 rounded-full px-3 bg-foreground text-background hover:bg-foreground/90",
+                    "ml-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong",
                     saved && "bg-success hover:bg-success",
                   )}
                 >
@@ -431,24 +433,24 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
         </div>
 
         <ScrollArea className="flex-1">
-          <div className="p-8">
+          <div className="mx-auto w-full max-w-3xl px-8 py-10">
             {activeTab === "note" ? (
               <>
                 <Textarea
                   value={noteMarkdown}
                   onChange={(e) => handleNoteChange(e.target.value)}
-                  placeholder="Clinical note markdown..."
-                  className="min-h-[600px] resize-none rounded-xl border-border bg-secondary font-mono text-sm leading-relaxed focus-visible:ring-1 focus-visible:ring-ring"
+                  placeholder="Clinical note markdown…"
+                  className="min-h-[640px] resize-none rounded-2xl border-border bg-card p-6 font-mono text-sm leading-relaxed text-foreground shadow-soft focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
                 />
                 {openClawError && openClawInitState === "failed" && (
-                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>{openClawError}</span>
                   </div>
                 )}
               </>
             ) : (
-              <div className="min-h-[600px] rounded-xl border border-border bg-secondary p-6">
+              <div className="min-h-[640px] rounded-2xl border border-border bg-card p-7 shadow-soft">
                 {encounter.transcript_text ? (
                   <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
                     {encounter.transcript_text}
@@ -466,13 +468,16 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
 
       {openClawPanelOpen && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setOpenClawPanelOpen(false)} />
-          <aside className="fixed right-0 top-0 z-50 h-screen w-[440px] border-l border-border bg-background shadow-2xl">
+          <div
+            className="fixed inset-0 z-40 bg-foreground/25 backdrop-blur-sm"
+            onClick={() => setOpenClawPanelOpen(false)}
+          />
+          <aside className="fixed right-0 top-0 z-50 h-screen w-[440px] border-l border-border bg-card shadow-lifted">
             <div className="flex h-full flex-col">
-              <div className="border-b border-border px-4 py-3">
+              <div className="border-b border-border px-5 py-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-foreground">OpenClaw Chat</p>
+                    <p className="font-display text-base font-medium tracking-tight text-foreground">OpenClaw Chat</p>
                     <p className="text-xs text-muted-foreground">
                       {openClawSessionId ? `Session: ${openClawSessionId}` : "Preparing session..."}
                     </p>
@@ -494,10 +499,10 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                     <div
                       key={msg.id}
                       className={cn(
-                        "max-w-[90%] rounded-xl px-3 py-2 text-xs",
-                        msg.role === "user" && "ml-auto bg-foreground text-background",
-                        msg.role === "assistant" && "mr-auto border border-border bg-secondary text-foreground",
-                        msg.role === "system" && "mr-auto border border-amber-300/40 bg-amber-100/20 text-foreground",
+                        "max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs",
+                        msg.role === "user" && "ml-auto bg-primary text-primary-foreground shadow-soft",
+                        msg.role === "assistant" && "mr-auto border border-border bg-background text-foreground",
+                        msg.role === "system" && "mr-auto border border-warning/40 bg-warning/10 text-foreground",
                       )}
                     >
                       <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
@@ -509,7 +514,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                     </div>
                   ))}
                   {openClawSending && (
-                    <div className="mr-auto inline-flex items-center gap-2 rounded-xl border border-border bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                    <div className="mr-auto inline-flex items-center gap-2 rounded-2xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       <span>Waiting for OpenClaw...</span>
                     </div>
@@ -524,7 +529,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                     value={openClawInput}
                     onChange={(e) => setOpenClawInput(e.target.value)}
                     placeholder="Message OpenClaw..."
-                    className="min-h-[44px] max-h-[140px] resize-y rounded-xl border-border bg-secondary text-sm"
+                    className="max-h-[140px] min-h-[44px] resize-y rounded-xl border-border bg-background text-sm"
                     disabled={openClawSending || openClawInitState === "sending"}
                   />
                   <Button

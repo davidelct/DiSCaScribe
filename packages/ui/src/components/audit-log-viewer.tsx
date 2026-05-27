@@ -84,25 +84,25 @@ export function AuditLogViewer({ onClose }: AuditLogViewerProps) {
   function getStatusBadge(success: boolean) {
     if (success) {
       return (
-        <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-900/20 dark:text-green-400">
+        <span className="inline-flex items-center rounded-full bg-success/15 px-2 py-1 text-xs font-medium text-success">
           Success
         </span>
       )
     }
     return (
-      <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-900/20 dark:text-red-400">
+      <span className="inline-flex items-center rounded-full bg-destructive/12 px-2 py-1 text-xs font-medium text-destructive">
         Failed
       </span>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-6xl rounded-lg border border-border bg-background shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+      <div className="animate-scale-in w-full max-w-6xl overflow-hidden rounded-3xl border border-border bg-card shadow-lifted">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-6">
           <div>
-            <h2 className="text-2xl font-semibold">Audit Log</h2>
+            <h2 className="font-display text-2xl font-medium tracking-tight">Audit Log</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               HIPAA compliance tracking for all system operations
             </p>
@@ -170,7 +170,7 @@ export function AuditLogViewer({ onClose }: AuditLogViewerProps) {
               {entries.map((entry) => (
                 <div
                   key={entry.id}
-                  className="rounded-lg border border-border bg-card p-4 hover:bg-muted/20"
+                  className="rounded-2xl border border-border bg-background p-4 transition-colors hover:bg-accent/40"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -183,7 +183,7 @@ export function AuditLogViewer({ onClose }: AuditLogViewerProps) {
                         {entry.resource_id && <> • Resource: {entry.resource_id}</>}
                       </div>
                       {entry.error_message && (
-                        <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                        <div className="mt-2 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
                           Error: {entry.error_message}
                         </div>
                       )}

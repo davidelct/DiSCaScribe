@@ -36,17 +36,17 @@ export function LocalSetupWizard({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-border bg-background p-6 shadow-2xl">
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold text-foreground">Local Setup</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
+      <div className="animate-scale-in w-full max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
+        <div className="mb-5">
+          <h2 className="font-display text-2xl font-medium tracking-tight text-foreground">Local Setup</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Required only for Local-only mode. Mixed mode remains your default until you switch.
           </p>
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-lg border border-border p-3">
+          <div className="rounded-2xl border border-border bg-background p-4">
             <div className="mb-2 text-sm font-medium text-foreground">1) System Check</div>
             <Button variant="outline" onClick={onRunCheck} disabled={isBusy}>Run Check</Button>
             {checks.length > 0 && (
@@ -58,15 +58,15 @@ export function LocalSetupWizard({
             )}
           </div>
 
-          <div className="rounded-lg border border-border p-3">
+          <div className="rounded-2xl border border-border bg-background p-4">
             <div className="mb-2 text-sm font-medium text-foreground">2) Whisper Model</div>
             <Button variant="outline" onClick={onDownloadWhisper} disabled={isBusy}>Download Whisper</Button>
           </div>
 
-          <div className="rounded-lg border border-border p-3">
+          <div className="rounded-2xl border border-border bg-background p-4">
             <div className="mb-2 text-sm font-medium text-foreground">3) Local Note Model</div>
             <select
-              className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="mb-2 h-11 w-full rounded-xl border border-input bg-card px-3.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
               value={selectedModel}
               onChange={(e) => onSelectedModelChange(e.target.value)}
               disabled={isBusy}

@@ -4,54 +4,67 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Updated to OpenAI-style minimal monochrome theme */
+/* ── Clinical Calm ──────────────────────────────────────────────
+   Warm paper canvas, deep slate ink, a single confident blue.
+   Light theme only; depth comes from soft shadows + warm layering. */
 :root {
-  --background: oklch(1 0 0); /* Pure white #FFFFFF */
-  --foreground: oklch(0.15 0 0); /* Near-black charcoal #111 */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0 0);
-  --primary: oklch(0.15 0 0); /* Black for primary actions */
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.97 0 0); /* Very light gray */
-  --secondary-foreground: oklch(0.15 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.4 0 0); /* Mid-gray #555-666 */
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.15 0 0);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.92 0 0);
-  --input: oklch(0.97 0 0);
-  --ring: oklch(0.15 0 0);
-  --chart-1: oklch(0.3 0 0);
-  --chart-2: oklch(0.4 0 0);
-  --chart-3: oklch(0.5 0 0);
-  --chart-4: oklch(0.6 0 0);
-  --chart-5: oklch(0.7 0 0);
-  --radius: 1rem; /* Rounded pill style */
-  --sidebar: oklch(0.98 0 0); /* Light gray sidebar */
-  --sidebar-foreground: oklch(0.15 0 0);
-  --sidebar-primary: oklch(0.15 0 0);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.15 0 0);
-  --sidebar-border: oklch(0.92 0 0);
-  --sidebar-ring: oklch(0.15 0 0);
-  --recording: oklch(0.15 0 0); /* Black for recording indicator */
-  --recording-foreground: oklch(1 0 0);
-  --success: oklch(0.5 0.15 145);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.65 0.15 60);
-  --warning-foreground: oklch(0.2 0 0);
+  --background: oklch(0.969 0.004 84); /* warm paper #F7F5F1 */
+  --foreground: oklch(0.27 0.02 250); /* deep blue-slate ink */
+  --card: oklch(0.992 0.003 84); /* elevated near-white */
+  --card-foreground: oklch(0.27 0.02 250);
+  --popover: oklch(0.992 0.003 84);
+  --popover-foreground: oklch(0.27 0.02 250);
+  --primary: oklch(0.52 0.11 250); /* clinical blue */
+  --primary-foreground: oklch(0.99 0.005 90);
+  --secondary: oklch(0.935 0.006 80); /* warm light fill */
+  --secondary-foreground: oklch(0.3 0.018 250);
+  --muted: oklch(0.94 0.005 80);
+  --muted-foreground: oklch(0.5 0.014 250); /* cool blue-gray */
+  --accent: oklch(0.93 0.018 250); /* soft blue-tinted hover */
+  --accent-foreground: oklch(0.3 0.025 250);
+  --destructive: oklch(0.55 0.16 28);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0.006 80);
+  --input: oklch(0.96 0.005 84);
+  --ring: oklch(0.52 0.11 250);
+  --chart-1: oklch(0.52 0.11 250);
+  --chart-2: oklch(0.46 0.12 250);
+  --chart-3: oklch(0.6 0.09 248);
+  --chart-4: oklch(0.7 0.06 246);
+  --chart-5: oklch(0.78 0.05 244);
+  --radius: 0.9rem;
+  --sidebar: oklch(0.95 0.006 82);
+  --sidebar-foreground: oklch(0.27 0.02 250);
+  --sidebar-primary: oklch(0.52 0.11 250);
+  --sidebar-primary-foreground: oklch(0.99 0.005 90);
+  --sidebar-accent: oklch(0.92 0.018 250);
+  --sidebar-accent-foreground: oklch(0.27 0.02 250);
+  --sidebar-border: oklch(0.89 0.007 80);
+  --sidebar-ring: oklch(0.52 0.11 250);
+  --recording: oklch(0.52 0.11 250); /* blue recording indicator */
+  --recording-foreground: oklch(0.99 0 0);
+  --success: oklch(0.55 0.1 165);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.75 0.12 75);
+  --warning-foreground: oklch(0.27 0.02 80);
+  --brand-soft: oklch(0.93 0.045 250); /* soft blue tint surface */
+  --brand-strong: oklch(0.46 0.12 250); /* deeper blue for gradients/hover */
+  --brand-foreground: oklch(0.99 0.005 90);
+
+  /* layered, optically-tuned shadows for soft clinical depth */
+  --shadow-color: 222 25% 14%;
+  --shadow-soft: 0 1px 2px hsl(var(--shadow-color) / 0.05),
+    0 8px 24px -12px hsl(var(--shadow-color) / 0.14);
+  --shadow-lifted: 0 1px 2px hsl(var(--shadow-color) / 0.06),
+    0 18px 48px -16px hsl(var(--shadow-color) / 0.22);
 }
 
-/* Removed dark mode - pure light theme only */
+/* Light theme only — dark mode intentionally omitted */
 
 @theme inline {
-  --font-sans: "Inter", "Geist", "Geist Fallback", system-ui, sans-serif;
-  --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-display), ui-serif, Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-code), ui-monospace, "SF Mono", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -94,13 +107,132 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --animate-fade-up: fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-scale-in: scale-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-breathe: breathe 3.4s ease-in-out infinite;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground antialiased;
+    /* two faint blue light-sources bring depth to the warm paper */
+    background-image:
+      radial-gradient(
+        1100px 620px at 100% -8%,
+        color-mix(in oklch, var(--primary) 8%, transparent),
+        transparent 58%
+      ),
+      radial-gradient(
+        880px 520px at -8% 112%,
+        color-mix(in oklch, var(--primary) 5%, transparent),
+        transparent 55%
+      );
+    background-attachment: fixed;
+    font-feature-settings: "ss01", "cv01";
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-feature-settings: "ss01";
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 24%, transparent);
+    color: var(--foreground);
+  }
+
+  /* slim, warm scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 16%, transparent);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--foreground) 28%, transparent);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+  }
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+  .shadow-lifted {
+    box-shadow: var(--shadow-lifted);
+  }
+  /* subtle inner top-highlight that reads as a real, lit surface */
+  .surface {
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 60%, transparent),
+      var(--shadow-soft);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* gentle "breathing" pulse for the live recording orb */
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 42%, transparent);
+  }
+  50% {
+    transform: scale(1.04);
+    box-shadow: 0 0 0 22px color-mix(in oklch, var(--primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

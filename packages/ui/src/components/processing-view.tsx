@@ -24,13 +24,15 @@ export function ProcessingView({
   onRetryNoteGeneration,
 }: ProcessingViewProps) {
   return (
-    <div className="flex flex-col items-center">
+    <div className="animate-fade-up flex w-full flex-col items-center">
       <div className="mb-10 text-center">
-        <p className="text-lg font-medium text-foreground">{patientName || "Unknown Patient"}</p>
-        <p className="mt-1 text-sm text-muted-foreground">Processing interview...</p>
+        <p className="font-display text-2xl font-medium tracking-tight text-foreground">
+          {patientName || "Unknown Patient"}
+        </p>
+        <p className="mt-1.5 text-sm text-muted-foreground">Processing interview…</p>
       </div>
 
-      <div className="w-full max-w-xs space-y-3">
+      <div className="w-full max-w-sm space-y-3">
         <ProcessingStep
           label="Transcribing audio"
           status={transcriptionStatus}
@@ -57,11 +59,11 @@ function ProcessingStep({
   return (
     <div
       className={cn(
-        "flex items-center gap-4 rounded-xl border p-4",
+        "flex items-center gap-4 rounded-2xl border p-4 transition-all duration-300",
         status === "failed" && "border-destructive/30 bg-destructive/5",
-        status === "done" && "border-border bg-secondary",
-        status === "in-progress" && "border-border bg-secondary",
-        status === "pending" && "border-border bg-transparent",
+        status === "done" && "border-primary/20 bg-brand-soft/50",
+        status === "in-progress" && "border-primary/30 bg-card shadow-soft",
+        status === "pending" && "border-border bg-card/40",
       )}
     >
       <StepIcon status={status} />
@@ -98,31 +100,31 @@ function ProcessingStep({
 function StepIcon({ status }: { status: StepStatus }) {
   if (status === "pending") {
     return (
-      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border">
-        <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border">
+        <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
       </div>
     )
   }
 
   if (status === "in-progress") {
     return (
-      <div className="flex h-6 w-6 items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-foreground" />
+      <div className="flex h-7 w-7 items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-primary" />
       </div>
     )
   }
 
   if (status === "done") {
     return (
-      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground">
-        <Check className="h-3.5 w-3.5 text-background" />
+      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-soft">
+        <Check className="h-4 w-4" />
       </div>
     )
   }
 
   return (
-    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-destructive">
-      <X className="h-3.5 w-3.5 text-destructive-foreground" />
+    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
+      <X className="h-4 w-4" />
     </div>
   )
 }
