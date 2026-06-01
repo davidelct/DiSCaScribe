@@ -91,6 +91,15 @@ const nextConfig = {
       '@ui': path.resolve(__dirname, '../packages/ui/src'),
       '@ui/lib': path.resolve(__dirname, '../packages/ui/src/lib'),
     }
+    // Resolve third-party packages from the web app's node_modules too. This lets
+    // `packages/*` source (imported via the aliases above) find deps like
+    // `lucide-react`/`date-fns` when the app is deployed with the web app as the
+    // install root (e.g. Vercel Root Directory = apps/web), where node's default
+    // upward resolution from `packages/` would otherwise miss them.
+    config.resolve.modules = [
+      path.resolve(__dirname, '../apps/web/node_modules'),
+      ...(config.resolve.modules ?? ['node_modules']),
+    ]
     return config
   },
 }
