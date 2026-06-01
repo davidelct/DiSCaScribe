@@ -11,7 +11,7 @@ export function IdleView({ onStartNew }: IdleViewProps) {
       <div className="animate-fade-up flex flex-col items-center">
         <button
           onClick={onStartNew}
-          aria-label="Start a new interview"
+          aria-label="Start a new encounter"
           className="group relative mb-9 flex h-24 w-24 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lifted outline-none transition-transform duration-300 hover:scale-105 focus-visible:ring-4 focus-visible:ring-primary/30 active:scale-95"
         >
           {/* soft halo that grows on hover */}
@@ -21,7 +21,7 @@ export function IdleView({ onStartNew }: IdleViewProps) {
         </button>
 
         <h2 className="font-display mb-3 text-3xl font-medium tracking-tight text-foreground">
-          Start a new interview
+          Start a new encounter
         </h2>
 
         <p className="max-w-xs text-center text-sm leading-relaxed text-muted-foreground text-balance">

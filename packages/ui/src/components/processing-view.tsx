@@ -29,7 +29,7 @@ export function ProcessingView({
         <p className="font-display text-2xl font-medium tracking-tight text-foreground">
           {patientName || "Unknown Patient"}
         </p>
-        <p className="mt-1.5 text-sm text-muted-foreground">Processing interview…</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">Processing encounter…</p>
       </div>
 
       <div className="w-full max-w-sm space-y-3">
