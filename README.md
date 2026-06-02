@@ -195,28 +195,6 @@ OpenScribe supports three workflows. **Mixed web mode is the default path.**
 - Notes: Anthropic Claude (or other hosted LLM)
 - Requires API keys in `apps/web/.env.local`
 
-### OpenClaw + OpenEMR Demo Handoff (desktop)
-- The note editor now includes `Send to OpenClaw` (desktop app path).
-- Trigger flow: record encounter -> note appears -> click `Send to OpenClaw`.
-- OpenScribe sends patient/note context to OpenClaw and requests an OpenEMR note action.
-
-Optional environment variables for demos:
-
-```bash
-# OpenClaw CLI (default: openclaw on PATH)
-OPENCLAW_BIN=openclaw
-
-# Target OpenClaw agent/session (default: main)
-OPENCLAW_AGENT=main
-
-# If set to 1, OpenClaw can deliver responses to a configured channel
-OPENCLAW_DELIVER=0
-
-# Optional webhook transport instead of CLI
-# OPENCLAW_DEMO_WEBHOOK_URL=http://127.0.0.1:8787/openscribe/handoff
-# OPENCLAW_DEMO_WEBHOOK_TOKEN=your-token
-```
-
 ### FYI Getting API Keys
 
 **OpenAI** (transcription): [platform.openai.com/api-keys](https://platform.openai.com/api-keys) - Sign up → API Keys → Create new secret key

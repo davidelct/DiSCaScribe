@@ -219,8 +219,6 @@ contextBridge.exposeInMainWorld('desktop', {
         'ensure-local-runtime-ready',
         'set-runtime-preference',
         'get-ipc-contract',
-        'send-to-openclaw',
-        'openclaw-chat-turn',
       ]);
 
       if (!allowed.has(channel)) {
