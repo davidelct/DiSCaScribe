@@ -13,12 +13,36 @@ interface TranscriptTurn {
 
 // Distinct, theme-aware accents cycled per speaker index.
 const SPEAKER_STYLES = [
-  { label: "text-sky-600 dark:text-sky-400", border: "border-sky-400/70 dark:border-sky-500/60", dot: "bg-sky-500" },
-  { label: "text-violet-600 dark:text-violet-400", border: "border-violet-400/70 dark:border-violet-500/60", dot: "bg-violet-500" },
-  { label: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-400/70 dark:border-emerald-500/60", dot: "bg-emerald-500" },
-  { label: "text-amber-600 dark:text-amber-400", border: "border-amber-400/70 dark:border-amber-500/60", dot: "bg-amber-500" },
-  { label: "text-rose-600 dark:text-rose-400", border: "border-rose-400/70 dark:border-rose-500/60", dot: "bg-rose-500" },
-  { label: "text-teal-600 dark:text-teal-400", border: "border-teal-400/70 dark:border-teal-500/60", dot: "bg-teal-500" },
+  {
+    label: "text-sky-600 dark:text-sky-400",
+    dot: "bg-sky-500",
+    bubble: "bg-sky-50 border-sky-200/70 dark:bg-sky-500/10 dark:border-sky-500/20",
+  },
+  {
+    label: "text-violet-600 dark:text-violet-400",
+    dot: "bg-violet-500",
+    bubble: "bg-violet-50 border-violet-200/70 dark:bg-violet-500/10 dark:border-violet-500/20",
+  },
+  {
+    label: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+    bubble: "bg-emerald-50 border-emerald-200/70 dark:bg-emerald-500/10 dark:border-emerald-500/20",
+  },
+  {
+    label: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+    bubble: "bg-amber-50 border-amber-200/70 dark:bg-amber-500/10 dark:border-amber-500/20",
+  },
+  {
+    label: "text-rose-600 dark:text-rose-400",
+    dot: "bg-rose-500",
+    bubble: "bg-rose-50 border-rose-200/70 dark:bg-rose-500/10 dark:border-rose-500/20",
+  },
+  {
+    label: "text-teal-600 dark:text-teal-400",
+    dot: "bg-teal-500",
+    bubble: "bg-teal-50 border-teal-200/70 dark:bg-teal-500/10 dark:border-teal-500/20",
+  },
 ] as const
 
 function speakerStyle(speaker: number) {
@@ -74,7 +98,7 @@ export function TranscriptView({ text }: TranscriptViewProps) {
 
   const distinctSpeakers = Array.from(new Set(turns.map((turn) => turn.speaker))).sort((a, b) => a - b)
 
-  // Single speaker: labels would be noise — render as plain prose.
+  // Single speaker: labels/bubbles would be noise — render as plain prose.
   if (distinctSpeakers.length <= 1) {
     return (
       <div className="space-y-4">
@@ -86,6 +110,11 @@ export function TranscriptView({ text }: TranscriptViewProps) {
       </div>
     )
   }
+
+  // Chat-style layout: alternate sides for the first two speakers; extra
+  // speakers stay left-aligned and are distinguished by color.
+  const speakerSide = new Map<number, "left" | "right">()
+  distinctSpeakers.forEach((speaker, index) => speakerSide.set(speaker, index % 2 === 1 ? "right" : "left"))
 
   return (
     <div className="space-y-5">
@@ -104,12 +133,24 @@ export function TranscriptView({ text }: TranscriptViewProps) {
       <div className="space-y-4">
         {turns.map((turn, index) => {
           const style = speakerStyle(turn.speaker)
+          const isRight = speakerSide.get(turn.speaker) === "right"
+          const showLabel = index === 0 || turns[index - 1].speaker !== turn.speaker
           return (
-            <div key={`${turn.speaker}-${index}`} className={cn("border-l-2 pl-4", style.border)}>
-              <p className={cn("mb-1 text-xs font-semibold uppercase tracking-wide", style.label)}>
-                Speaker {turn.speaker + 1}
-              </p>
-              <p className="text-[0.95rem] leading-7 text-foreground/85">{turn.text}</p>
+            <div key={`${turn.speaker}-${index}`} className={cn("flex flex-col", isRight ? "items-end" : "items-start")}>
+              {showLabel && (
+                <span className={cn("mb-1 px-1 text-xs font-semibold uppercase tracking-wide", style.label)}>
+                  Speaker {turn.speaker + 1}
+                </span>
+              )}
+              <div
+                className={cn(
+                  "max-w-[85%] rounded-2xl border px-4 py-2.5 text-[0.95rem] leading-7 text-foreground shadow-soft",
+                  style.bubble,
+                  isRight ? "rounded-tr-sm" : "rounded-tl-sm",
+                )}
+              >
+                {turn.text}
+              </div>
             </div>
           )
         })}
