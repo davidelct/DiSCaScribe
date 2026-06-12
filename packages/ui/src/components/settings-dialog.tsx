@@ -4,26 +4,16 @@ import { useState, useEffect, useRef } from "react"
 import { X } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
-import type { NoteLength, ProcessingMode } from "@storage/preferences"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
 import { AuditLogViewer } from "./audit-log-viewer"
 
 interface SettingsDialogProps {
   isOpen: boolean
   onClose: () => void
-  noteLength: NoteLength
-  onNoteLengthChange: (length: NoteLength) => void
-  processingMode: ProcessingMode
-  onProcessingModeChange: (mode: ProcessingMode) => void | Promise<boolean>
-  localBackendAvailable: boolean
-  anthropicApiKey: string
-  onAnthropicApiKeyChange: (value: string) => void
-  onSaveAnthropicApiKey: (value: string) => Promise<void>
   audioInputDevices: Array<{ id: string; label: string }>
   preferredInputDeviceId?: string
   onPreferredInputDeviceChange: (value: string) => void
   micPermissionStatus?: string
-  mixedAuthSource?: "server_file" | "env" | "none"
   lastMicReadinessMessage?: string
   lastMicReadinessMetrics?: { rms: number; peak: number } | null
   lastFailureCode?: string
@@ -33,19 +23,10 @@ interface SettingsDialogProps {
 export function SettingsDialog({
   isOpen,
   onClose,
-  noteLength,
-  onNoteLengthChange,
-  processingMode,
-  onProcessingModeChange,
-  localBackendAvailable,
-  anthropicApiKey,
-  onAnthropicApiKeyChange,
-  onSaveAnthropicApiKey,
   audioInputDevices,
   preferredInputDeviceId,
   onPreferredInputDeviceChange,
   micPermissionStatus,
-  mixedAuthSource,
   lastMicReadinessMessage,
   lastMicReadinessMetrics,
   lastFailureCode,
@@ -76,7 +57,6 @@ export function SettingsDialog({
     setSaveMessage("")
 
     try {
-      await onSaveAnthropicApiKey(anthropicApiKey)
       // Save retention policy
       setAuditRetentionDays(retentionDays)
 
@@ -129,119 +109,6 @@ export function SettingsDialog({
 
         {/* Settings Content */}
         <div className="space-y-6">
-          {/* Note Length Setting */}
-          <div className="space-y-3">
-            <Label className="text-base font-medium text-foreground">Note Length</Label>
-            <p className="text-sm text-muted-foreground">
-              Choose between concise or detailed clinical notes
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => onNoteLengthChange("short")}
-                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
-                  noteLength === "short"
-                    ? "border-primary bg-brand-soft/60"
-                    : "border-border hover:border-primary/40"
-                }`}
-              >
-                <div className="font-medium text-foreground">Short</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Brief, focused documentation
-                </div>
-              </button>
-              <button
-                onClick={() => onNoteLengthChange("long")}
-                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
-                  noteLength === "long"
-                    ? "border-primary bg-brand-soft/60"
-                    : "border-border hover:border-primary/40"
-                }`}
-              >
-                <div className="font-medium text-foreground">Long</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Comprehensive, detailed notes
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-border" />
-
-          {/* Processing Mode */}
-          <div className="space-y-3">
-            <Label className="text-base font-medium text-foreground">Processing Mode</Label>
-            <p className="text-sm text-muted-foreground">
-              Choose the default desktop pipeline for transcription and note generation.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => onProcessingModeChange("mixed")}
-                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
-                  processingMode === "mixed"
-                    ? "border-primary bg-brand-soft/60"
-                    : "border-border hover:border-primary/40"
-                }`}
-              >
-                <div className="font-medium text-foreground">Mixed (Default)</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Cloud transcription + Claude note generation
-                </div>
-              </button>
-              <button
-                onClick={() => onProcessingModeChange("local")}
-                disabled={!localBackendAvailable}
-                className={`flex-1 rounded-2xl border-2 p-4 text-left transition-all ${
-                  processingMode === "local"
-                    ? "border-primary bg-brand-soft/60"
-                    : "border-border hover:border-primary/40"
-                } ${!localBackendAvailable ? "cursor-not-allowed opacity-50" : ""}`}
-              >
-                <div className="font-medium text-foreground">Local-only</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  On-device transcription + local Ollama note generation
-                </div>
-              </button>
-            </div>
-            {!localBackendAvailable && (
-              <p className="text-xs text-muted-foreground">
-                Local-only mode requires the desktop backend runtime to be available.
-              </p>
-            )}
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-border" />
-
-          {/* API Keys */}
-          <div className="space-y-3">
-            <Label className="text-base font-medium text-foreground">Cloud API Key (Mixed Mode)</Label>
-            <p className="text-sm text-muted-foreground">
-              Mixed mode requires an Anthropic key for note generation.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="anthropic-api-key" className="text-sm font-medium text-foreground">
-                Anthropic API Key
-              </Label>
-              <input
-                id="anthropic-api-key"
-                type="password"
-                value={anthropicApiKey}
-                onChange={(e) => onAnthropicApiKeyChange(e.target.value)}
-                placeholder="sk-ant-..."
-                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Mixed auth source: {mixedAuthSource || "none"}
-            </p>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-border" />
-
           {/* Audio Input */}
           <div className="space-y-3">
             <Label className="text-base font-medium text-foreground">Audio Input</Label>

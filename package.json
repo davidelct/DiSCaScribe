@@ -5,16 +5,11 @@
   "license": "MIT",
   "description": "OpenScribe – privacy-conscious clinical documentation assistant",
   "author": "Sam Margolis",
-  "main": "packages/shell/main.js",
   "scripts": {
     "setup": "node scripts/setup-env.js",
     "build": "next build apps/web --webpack",
     "dev": "next dev apps/web --webpack -p 3001",
-    "dev:desktop": "concurrently -k \"pnpm dev:local\" \"pnpm electron:dev\"",
-    "electron:dev": "wait-on tcp:3001 && cross-env NODE_ENV=development ELECTRON_START_URL=http://localhost:3001 electron packages/shell/main.js",
     "medasr:server": ". .venv-med/bin/activate && python scripts/medasr_server.py --port 8001",
-    "whisper:server": "local-only/openscribe-backend/.venv-backend/bin/python scripts/whisper_server.py --port 8002 --model tiny.en --backend cpp --gpu",
-    "dev:local": "bash scripts/dev-local.sh",
     "dev:local:medasr": "concurrently -k \"pnpm medasr:server\" \"pnpm dev\"",
     "lint": "pnpm lint:structure && eslint --config config/eslint.config.mjs .",
     "lint:structure": "node config/scripts/check-structure.mjs",
@@ -29,25 +24,6 @@
     "test:no-phi-logs": "node scripts/check-no-phi-logs.mjs",
     "test:llm": "pnpm build:test && find build/tests-dist/llm/src/__tests__ -name \"*.test.js\" -print0 | xargs -0 node --test",
     "test:note": "pnpm build:test && find build/tests-dist/pipeline/note-core/src/__tests__ -name \"*.test.js\" -print0 | xargs -0 node --test",
-    "build:desktop": "node scripts/build-desktop.mjs current",
-    "build:desktop:all": "node scripts/build-desktop.mjs all",
-    "build:desktop:mac": "node scripts/build-desktop.mjs mac",
-    "build:desktop:win": "node scripts/build-desktop.mjs win",
-    "build:desktop:linux": "node scripts/build-desktop.mjs linux",
-    "build:backend": "node local-only/openscribe-backend/scripts/build-backend.mjs",
-    "build:release:manifest": "node scripts/generate-release-manifest.mjs",
-    "build:release:checksums": "node scripts/generate-checksums.mjs",
-    "build:release:collect": "node scripts/collect-release-assets.mjs",
-    "release:rc:local": "pnpm lint:structure && pnpm build:test && PYTHONPATH=local-only/openscribe-backend python3 -m unittest discover -s local-only/openscribe-backend/tests -p \"test*_unittest.py\" && node scripts/build-desktop.mjs current && node scripts/build-desktop.mjs current \"\" dir && pnpm test:desktop:artifacts && pnpm test:e2e:desktop:launch && pnpm test:e2e:desktop:lifecycle && pnpm build:release:manifest && pnpm build:release:checksums",
-    "test:desktop:artifacts": "node scripts/smoke-desktop-artifacts.mjs",
-    "test:e2e:desktop:provision": "node scripts/e2e/provision-clean-env.mjs",
-    "test:e2e:desktop:fixtures": "node scripts/e2e/generate-fixtures.mjs",
-    "test:e2e:desktop:launch": "node scripts/e2e/desktop-launch-smoke.mjs",
-    "test:e2e:desktop:lifecycle": "node scripts/e2e/desktop-install-lifecycle.mjs",
-    "test:e2e:desktop:evidence": "node scripts/e2e/validate-release-evidence.mjs",
-    "test:e2e:desktop:ipc": "node --test scripts/e2e/desktop-ipc-contract.test.mjs",
-    "test:e2e:desktop:signing": "node scripts/e2e/verify-signing.mjs",
-    "download:ollama": "bash local-only/openscribe-backend/scripts/download-ollama.sh",
     "medgemma:scribe": "node scripts/medgemma-scribe.mjs",
     "medscribe:local": ". .venv-med/bin/activate && python scripts/local_medscribe.py"
   },
@@ -114,81 +90,16 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "asar": "^3.2.0",
     "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron": "^39.2.5",
-    "electron-builder": "^26.8.1",
-    "electron-builder-squirrel-windows": "26.8.1",
     "eslint": "^9.13.0",
     "eslint-plugin-react": "^7.35.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-unicorn": "^54.0.0",
-    "ffmpeg-static": "^5.3.0",
-    "fs-extra": "^11.3.2",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.2",
     "tw-animate-css": "1.3.3",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.10.0",
-    "wait-on": "^9.0.4"
-  },
-  "build": {
-    "appId": "com.openscribe.desktop",
-    "productName": "OpenScribe",
-    "directories": {
-      "output": "build/dist"
-    },
-    "asarUnpack": [
-      "node_modules/@anthropic-ai/**",
-      "node_modules/**/*.node"
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "hardenedRuntime": true,
-      "entitlements": "config/macos.entitlements.plist",
-      "entitlementsInherit": "config/macos.entitlements.plist",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "OpenScribe captures clinician and patient speech to document visits accurately.",
-        "NSScreenCaptureDescription": "OpenScribe captures system audio to transcribe all voices in the clinical encounter."
-      }
-    },
-    "win": {
-      "target": [
-        "nsis",
-        "zip"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Utility"
-    },
-    "files": [
-      "packages/shell/**/*",
-      "package.json",
-      "node_modules/**/*",
-      "!node_modules/.cache/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "apps/web/.next/standalone",
-        "to": "next"
-      },
-      {
-        "from": "local-only/openscribe-backend/dist/openscribe-backend",
-        "to": "openscribe-backend"
-      }
-    ],
-    "extraMetadata": {
-      "comment": "Standalone Next.js server with all dependencies"
-    }
+    "typescript-eslint": "^8.10.0"
   },
   "pnpm": {
     "overrides": {

@@ -9,7 +9,6 @@ COPY config ./config
 COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
-COPY local-only ./local-only
 
 RUN pnpm install --frozen-lockfile
 

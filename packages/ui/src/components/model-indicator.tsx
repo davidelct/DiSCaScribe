@@ -2,11 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { Cpu, Cloud } from "lucide-react"
-import type { ProcessingMode } from "@storage/preferences"
-
-interface ModelIndicatorProps {
-  processingMode: ProcessingMode
-}
 
 type TranscriptionProvider = "whisper_local" | "whisper_openai" | "medasr" | "deepgram"
 
@@ -21,7 +16,7 @@ const TRANSCRIPTION_LABELS: Record<TranscriptionProvider, { label: string; cloud
  * Displays the current AI models in use for transcription and note generation.
  * Placed in the sidebar between the encounter list and settings bar.
  */
-export function ModelIndicator({ processingMode }: ModelIndicatorProps) {
+export function ModelIndicator() {
   // Transcription provider is decided server-side (TRANSCRIPTION_PROVIDER), so
   // fetch the resolved value rather than hardcoding a label.
   const [provider, setProvider] = useState<TranscriptionProvider | null>(null)
@@ -45,8 +40,8 @@ export function ModelIndicator({ processingMode }: ModelIndicatorProps) {
   const transcriptionLabel = transcription?.label ?? "Whisper"
   const TranscriptionIcon = transcription?.cloud ? Cloud : Cpu
 
-  const noteModel = processingMode === "local" ? "Ollama (Local)" : "Claude (Cloud)"
-  const NoteIcon = processingMode === "local" ? Cpu : Cloud
+  const noteModel = "Claude (Cloud)"
+  const NoteIcon = Cloud
 
   return (
     <div className="shrink-0 border-t border-sidebar-border px-4 py-3.5">

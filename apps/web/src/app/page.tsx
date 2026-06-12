@@ -9,7 +9,7 @@ import {
   type PipelineError,
 } from "@pipeline-errors"
 import type { Encounter } from "@storage/types"
-import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, LocalSetupWizard, useHttpsWarning } from "@ui"
+import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, useHttpsWarning } from "@ui"
 import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, warmupSystemAudioPermission, compressAudioFileToMp3 } from "@audio"
 import { useSegmentUpload, type UploadError } from "@transcription";
@@ -18,11 +18,6 @@ import { generateClinicalNote } from "@/app/actions"
 import {
   getPreferences,
   setPreferences,
-  getApiKeys,
-  getMixedModeAuthStatus,
-  setApiKeys,
-  type NoteLength,
-  type ProcessingMode,
   debugLog,
   debugLogPHI,
   debugError,
@@ -50,52 +45,6 @@ type ProcessingMetrics = {
 const SEGMENT_DURATION_MS = 10000
 const OVERLAP_MS = 250
 
-type BackendProcessingEvent = {
-  success?: boolean
-  sessionName?: string
-  message?: string
-  error?: string
-  meetingData?: {
-    session_info?: {
-      name?: string
-      summary_file?: string
-      transcript_file?: string
-      duration_seconds?: number
-      duration_minutes?: number
-      note_type?: string
-    }
-    summary?: string
-    participants?: string[]
-    key_points?: string[]
-    action_items?: string[]
-    clinical_note?: string
-    transcript?: string
-  }
-}
-
-type SetupStatus = {
-  setup_completed?: boolean
-  selected_model?: string
-}
-
-type LocalRuntimeReadiness = {
-  success?: boolean
-  code?: string
-  errorCode?: string
-  userMessage?: string
-  error?: string
-  details?: unknown
-}
-
-type MixedRuntimeReadiness = {
-  success?: boolean
-  code?: string
-  errorCode?: string
-  userMessage?: string
-  error?: string
-  details?: unknown
-}
-
 type MicReadinessResult = {
   success: boolean
   code?: string
@@ -105,13 +54,6 @@ type MicReadinessResult = {
     peak: number
   }
   activeDeviceId?: string
-}
-
-function templateForVisitReason(visitReason?: string): "default" | "soap" {
-  if (!visitReason) return "default"
-  const normalized = visitReason.toLowerCase()
-  if (normalized === "problem_visit" || normalized === "soap") return "soap"
-  return "default"
 }
 
 function resolveApiBaseUrl(): string {
@@ -129,7 +71,7 @@ function resolveApiBaseUrl(): string {
 
 function HomePageContent() {
   const { encounters, addEncounter, updateEncounter, deleteEncounter: removeEncounter, refresh } = useEncounters()
-  
+
   // HIPAA Compliance: Warn if production build is served over HTTP
   const httpsWarning = useHttpsWarning()
 
@@ -151,82 +93,23 @@ function HomePageContent() {
   const finalTranscriptRef = useRef<string>("")
   const finalRecordingRef = useRef<Blob | null>(null)
   const apiBaseUrlRef = useRef<string>(resolveApiBaseUrl())
-  const lastMeetingDataRef = useRef<BackendProcessingEvent["meetingData"] | null>(null)
 
   const [showPermissionsDialog, setShowPermissionsDialog] = useState(false)
-  const permissionCheckInProgressRef = useRef(false)
+  const permissionsPrimedRef = useRef(false)
 
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
-  const [showMixedKeyPrompt, setShowMixedKeyPrompt] = useState(false)
-  const [showMixedRuntimePrompt, setShowMixedRuntimePrompt] = useState(false)
-  const [mixedRuntimePromptMessage, setMixedRuntimePromptMessage] = useState("")
-  const [mixedRuntimePromptCode, setMixedRuntimePromptCode] = useState("")
-  const [showLocalRuntimePrompt, setShowLocalRuntimePrompt] = useState(false)
-  const [localRuntimePromptMessage, setLocalRuntimePromptMessage] = useState("")
-  const [localRuntimePromptCode, setLocalRuntimePromptCode] = useState("")
-  const [anthropicApiKeyInput, setAnthropicApiKeyInput] = useState("")
-  const [hasAnthropicApiKey, setHasAnthropicApiKey] = useState(false)
-  const [mixedAuthStatusLoaded, setMixedAuthStatusLoaded] = useState(false)
-  const [mixedAuthSource, setMixedAuthSource] = useState<"server_file" | "env" | "none">("none")
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
   const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
   const [micPermissionStatus, setMicPermissionStatus] = useState("unknown")
   const [lastMicReadiness, setLastMicReadiness] = useState<MicReadinessResult | null>(null)
   const [lastFailureCode, setLastFailureCode] = useState("")
-  const [noteLength, setNoteLengthState] = useState<NoteLength>("long")
-  const [processingMode, setProcessingModeState] = useState<ProcessingMode>("mixed")
-  const [localBackendAvailable, setLocalBackendAvailable] = useState(false)
-  const [localDurationMs, setLocalDurationMs] = useState(0)
-  const [localPaused, setLocalPaused] = useState(false)
-  const [showLocalSetupWizard, setShowLocalSetupWizard] = useState(false)
-  const [setupChecks, setSetupChecks] = useState<[string, string][]>([])
-  const [setupBusy, setSetupBusy] = useState(false)
-  const [setupStatusMessage, setSetupStatusMessage] = useState("")
-  const [supportedModels, setSupportedModels] = useState<string[]>(["llama3.2:1b"])
-  const [selectedSetupModel, setSelectedSetupModel] = useState("llama3.2:1b")
-  const localSessionNameRef = useRef<string | null>(null)
-  const localBackendRef = useRef<Window["desktop"]["openscribeBackend"] | null>(null)
-  const localLastTickRef = useRef<number | null>(null)
-  const mixedWarmupStartedRef = useRef(false)
 
   useEffect(() => {
     const prefs = getPreferences()
-    setNoteLengthState(prefs.noteLength)
-    setProcessingModeState(prefs.processingMode)
     setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
 
     // Initialize audit logging system (cleanup old entries, setup periodic cleanup)
     void initializeAuditLog()
-  }, [])
-
-  useEffect(() => {
-    const loadApiKeys = async () => {
-      try {
-        const [keys, mixedAuthStatus] = await Promise.all([getApiKeys(), getMixedModeAuthStatus()])
-        const anthropicKey = (keys.anthropicApiKey || "").trim()
-        setAnthropicApiKeyInput(anthropicKey)
-        setHasAnthropicApiKey(mixedAuthStatus.hasAnthropicKeyConfigured)
-        setMixedAuthSource(mixedAuthStatus.source)
-        if (mixedAuthStatus.hasAnthropicKeyConfigured) {
-          setShowMixedKeyPrompt(false)
-        }
-      } catch (error) {
-        debugWarn("Failed to load API keys", error)
-        setAnthropicApiKeyInput("")
-        setHasAnthropicApiKey(false)
-        setMixedAuthSource("none")
-      } finally {
-        setMixedAuthStatusLoaded(true)
-      }
-    }
-    void loadApiKeys()
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const backend = window.desktop?.openscribeBackend
-    localBackendRef.current = backend ?? null
-    setLocalBackendAvailable(!!backend)
   }, [])
 
   useEffect(() => {
@@ -252,101 +135,27 @@ function HomePageContent() {
     return () => navigator.mediaDevices.removeEventListener?.("devicechange", refreshAudioDevices)
   }, [])
 
-  useEffect(() => {
-    if (!localBackendAvailable || !localBackendRef.current) return
-
-    const loadSetup = async () => {
-      try {
-        const status = await localBackendRef.current!.invoke("get-setup-status")
-        const models = await localBackendRef.current!.invoke("list-models")
-        const setupData = status as SetupStatus & { success?: boolean }
-        const modelData = models as { success?: boolean; supported_models?: Record<string, unknown>; current_model?: string }
-        const modelNames = modelData?.supported_models ? Object.keys(modelData.supported_models) : ["llama3.2:1b"]
-        setSupportedModels(modelNames)
-        const preferredModel = setupData?.selected_model || modelData?.current_model || modelNames[0] || "llama3.2:1b"
-        setSelectedSetupModel(preferredModel)
-      } catch (error) {
-        debugWarn("Local setup status load failed", error)
+  const refreshMicPermissionStatus = useCallback(async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.permissions?.query) {
+        const status = await navigator.permissions.query({ name: "microphone" as PermissionName })
+        setMicPermissionStatus(status.state)
+        return
       }
+    } catch {
+      // Permissions API not supported for "microphone" in this browser.
     }
+    setMicPermissionStatus("unknown")
+  }, [])
 
-    void loadSetup()
-  }, [localBackendAvailable])
-
+  // Warm up microphone permission once on mount so the first recording starts fast.
   useEffect(() => {
-    if (processingMode !== "local") return
-    if (localBackendAvailable) return
-    debugWarn("Local-only mode selected but desktop backend is unavailable; falling back to mixed mode")
-    setProcessingModeState("mixed")
-    void setPreferences({ processingMode: "mixed" })
-  }, [localBackendAvailable, processingMode])
-
-  useEffect(() => {
-    setShowMixedKeyPrompt(mixedAuthStatusLoaded && processingMode === "mixed" && !hasAnthropicApiKey)
-  }, [mixedAuthStatusLoaded, processingMode, hasAnthropicApiKey])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    if (window.__openscribePermissionsPrimed) return
-    if (permissionCheckInProgressRef.current) return
-    
-    window.__openscribePermissionsPrimed = true
-    permissionCheckInProgressRef.current = true
-
-    const checkPermissions = async () => {
-      try {
-        const desktop = window.desktop
-        debugLog("[Main Page] Desktop object available:", !!desktop)
-        debugLog("[Main Page] Desktop API methods:", desktop ? Object.keys(desktop) : "none")
-        
-        if (!desktop?.getMediaAccessStatus) {
-          // Not in desktop environment, just warmup browser permissions
-          debugLog("[Main Page] Not in desktop environment, skipping permission dialog")
-          void warmupMicrophonePermission()
-          return
-        }
-
-        debugLog("[Main Page] Checking microphone permission...")
-        const micStatus = await desktop.getMediaAccessStatus("microphone")
-        setMicPermissionStatus(micStatus)
-        debugLog("[Main Page] Microphone status:", micStatus)
-        
-        if (micStatus !== "granted") {
-          debugLog("[Main Page] Missing microphone permission, showing dialog")
-          setShowPermissionsDialog(true)
-        } else {
-          const readiness = desktop.checkMicrophoneReadiness
-            ? ((await desktop.checkMicrophoneReadiness(preferredInputDeviceId || "")) as MicReadinessResult)
-            : ({ success: await warmupMicrophonePermission() } as MicReadinessResult)
-          setLastMicReadiness(readiness)
-          const micReady = !!readiness.success
-          if (!micReady) {
-            debugLog("[Main Page] Microphone permission granted but readiness failed")
-            setShowPermissionsDialog(true)
-          } else {
-            debugLog("[Main Page] All permissions granted, warmup only")
-            void warmupMicrophonePermission()
-            void warmupSystemAudioPermission()
-          }
-        }
-      } catch (error) {
-        debugError("[Main Page] Permission check failed:", error)
-      } finally {
-        permissionCheckInProgressRef.current = false
-      }
-    }
-
-    void checkPermissions()
-  }, [preferredInputDeviceId])
-
-  const handlePermissionsComplete = async () => {
-    const ready = await runMicReadinessCheck(false)
-    if (ready) {
-      setShowPermissionsDialog(false)
-      void warmupMicrophonePermission()
-      void warmupSystemAudioPermission()
-    }
-  }
+    if (permissionsPrimedRef.current) return
+    permissionsPrimedRef.current = true
+    void warmupMicrophonePermission()
+    void warmupSystemAudioPermission()
+    void refreshMicPermissionStatus()
+  }, [refreshMicPermissionStatus])
 
   const handleOpenSettings = () => {
     setShowSettingsDialog(true)
@@ -356,43 +165,18 @@ function HomePageContent() {
     setShowSettingsDialog(false)
   }
 
-  const handleNoteLengthChange = (length: NoteLength) => {
-    setNoteLengthState(length)
-    setPreferences({ noteLength: length })
-  }
-
-  const refreshMicPermissionStatus = useCallback(async () => {
-    try {
-      const desktop = window.desktop
-      if (desktop?.getMediaAccessStatus) {
-        const status = await desktop.getMediaAccessStatus("microphone")
-        setMicPermissionStatus(status)
-      } else {
-        setMicPermissionStatus("unknown")
-      }
-    } catch {
-      setMicPermissionStatus("unknown")
-    }
-  }, [])
-
   const runMicReadinessCheck = useCallback(
     async (showPromptOnFailure = true): Promise<boolean> => {
       try {
         await refreshMicPermissionStatus()
-        const desktop = window.desktop
-        let result: MicReadinessResult
-        if (desktop?.checkMicrophoneReadiness) {
-          result = await desktop.checkMicrophoneReadiness(preferredInputDeviceId || "")
-        } else {
-          const warmed = await warmupMicrophonePermission()
-          result = warmed
-            ? { success: true }
-            : {
-                success: false,
-                code: "MIC_STREAM_UNAVAILABLE",
-                userMessage: "Unable to access microphone. Check permission and selected input device.",
-              }
-        }
+        const warmed = await warmupMicrophonePermission()
+        const result: MicReadinessResult = warmed
+          ? { success: true }
+          : {
+              success: false,
+              code: "MIC_STREAM_UNAVAILABLE",
+              userMessage: "Unable to access microphone. Check permission and selected input device.",
+            }
         setLastMicReadiness(result)
         if (!result.success && showPromptOnFailure) {
           setLastFailureCode(result.code || "MIC_STREAM_UNAVAILABLE")
@@ -412,8 +196,17 @@ function HomePageContent() {
         return false
       }
     },
-    [preferredInputDeviceId, refreshMicPermissionStatus],
+    [refreshMicPermissionStatus],
   )
+
+  const handlePermissionsComplete = async () => {
+    const ready = await runMicReadinessCheck(false)
+    if (ready) {
+      setShowPermissionsDialog(false)
+      void warmupMicrophonePermission()
+      void warmupSystemAudioPermission()
+    }
+  }
 
   const handlePreferredInputDeviceChange = useCallback((value: string) => {
     setPreferredInputDeviceId(value)
@@ -430,170 +223,6 @@ function HomePageContent() {
       normalized === "none"
     )
   }, [])
-
-  const ensureMixedRuntimeReady = useCallback(async (showPromptOnFailure = true): Promise<{ ok: boolean; payload?: MixedRuntimeReadiness }> => {
-    if (!localBackendRef.current) {
-      return { ok: true }
-    }
-
-    try {
-      const result = (await localBackendRef.current.invoke("ensure-mixed-runtime-ready")) as MixedRuntimeReadiness
-      if (result?.success) {
-        setShowMixedRuntimePrompt(false)
-        setMixedRuntimePromptCode("")
-        setMixedRuntimePromptMessage("")
-        return { ok: true, payload: result }
-      }
-
-      if (showPromptOnFailure) {
-        const code = result?.code || result?.errorCode || "MIXED_RUNTIME_NOT_READY"
-        const message = result?.userMessage || result?.error || "Mixed runtime is not ready."
-        setMixedRuntimePromptCode(code)
-        setMixedRuntimePromptMessage(message)
-        setShowMixedRuntimePrompt(true)
-      }
-      return { ok: false, payload: result }
-    } catch (error) {
-      if (showPromptOnFailure) {
-        const message = error instanceof Error ? error.message : "Mixed runtime readiness check failed."
-        setMixedRuntimePromptCode("MIXED_RUNTIME_CHECK_FAILED")
-        setMixedRuntimePromptMessage(message)
-        setShowMixedRuntimePrompt(true)
-      }
-      return { ok: false }
-    }
-  }, [])
-
-  const ensureLocalRuntimeReady = useCallback(async (): Promise<{ ok: boolean; payload?: LocalRuntimeReadiness }> => {
-    if (!localBackendRef.current) {
-      const payload: LocalRuntimeReadiness = {
-        success: false,
-        code: "LOCAL_BACKEND_UNAVAILABLE",
-        userMessage: "Local backend is unavailable on this machine.",
-      }
-      setLocalRuntimePromptCode(payload.code)
-      setLocalRuntimePromptMessage(payload.userMessage || "Local runtime is unavailable.")
-      setShowLocalRuntimePrompt(true)
-      return { ok: false, payload }
-    }
-
-    try {
-      const result = (await localBackendRef.current.invoke("ensure-local-runtime-ready")) as LocalRuntimeReadiness
-      if (result?.success) {
-        setShowLocalRuntimePrompt(false)
-        setLocalRuntimePromptMessage("")
-        setLocalRuntimePromptCode("")
-        return { ok: true, payload: result }
-      }
-      const message = result?.userMessage || result?.error || "Local runtime is not ready."
-      setLocalRuntimePromptCode(result?.code || result?.errorCode || "LOCAL_RUNTIME_NOT_READY")
-      setLocalRuntimePromptMessage(message)
-      setShowLocalRuntimePrompt(true)
-      return { ok: false, payload: result }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Local runtime readiness check failed."
-      setLocalRuntimePromptCode("LOCAL_RUNTIME_CHECK_FAILED")
-      setLocalRuntimePromptMessage(message)
-      setShowLocalRuntimePrompt(true)
-      return { ok: false }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!localBackendAvailable || !localBackendRef.current) return
-    if (mixedWarmupStartedRef.current) return
-    mixedWarmupStartedRef.current = true
-    void ensureMixedRuntimeReady(false)
-  }, [ensureMixedRuntimeReady, localBackendAvailable])
-
-  const handleProcessingModeChange = useCallback(async (mode: ProcessingMode) => {
-    if (mode === "local") {
-      const readiness = await ensureLocalRuntimeReady()
-      if (!readiness.ok) {
-        return false
-      }
-      setProcessingModeState("local")
-      setPreferences({ processingMode: "local" })
-      void localBackendRef.current?.invoke("set-runtime-preference", "local")
-      setShowMixedKeyPrompt(false)
-      return true
-    }
-
-    setProcessingModeState("mixed")
-    setPreferences({ processingMode: "mixed" })
-    void localBackendRef.current?.invoke("set-runtime-preference", "mixed")
-    if (!hasAnthropicApiKey) {
-      setShowMixedKeyPrompt(true)
-    }
-    return true
-  }, [ensureLocalRuntimeReady, hasAnthropicApiKey])
-
-  const handleSaveAnthropicApiKey = useCallback(async (value: string) => {
-    const trimmed = value.trim()
-    await setApiKeys({ anthropicApiKey: trimmed })
-    const status = await getMixedModeAuthStatus()
-    setHasAnthropicApiKey(status.hasAnthropicKeyConfigured)
-    setMixedAuthSource(status.source)
-    if (status.hasAnthropicKeyConfigured) {
-      setShowMixedKeyPrompt(false)
-    }
-  }, [])
-
-  const runSetupAction = useCallback(
-    async (label: string, action: () => Promise<unknown>) => {
-      setSetupBusy(true)
-      setSetupStatusMessage(label)
-      try {
-        const result = await action()
-        const payload = result as { success?: boolean; message?: string; error?: string }
-        if (payload?.success === false) {
-          throw new Error(payload.error || `${label} failed`)
-        }
-        if (payload?.message) {
-          setSetupStatusMessage(payload.message)
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setSetupStatusMessage(message)
-      } finally {
-        setSetupBusy(false)
-      }
-    },
-    [],
-  )
-
-  const handleRunSetupCheck = useCallback(async () => {
-    if (!localBackendRef.current) return
-    await runSetupAction("Running system check...", async () => {
-      const result = await localBackendRef.current!.invoke("startup-setup-check")
-      const payload = result as { checks?: [string, string][] }
-      setSetupChecks(payload?.checks || [])
-      return result
-    })
-  }, [runSetupAction])
-
-  const handleDownloadWhisper = useCallback(async () => {
-    if (!localBackendRef.current) return
-    await runSetupAction("Downloading Whisper model...", async () => localBackendRef.current!.invoke("setup-whisper"))
-  }, [runSetupAction])
-
-  const handleDownloadSetupModel = useCallback(async () => {
-    if (!localBackendRef.current) return
-    await runSetupAction(`Downloading ${selectedSetupModel}...`, async () =>
-      localBackendRef.current!.invoke("setup-ollama-and-model", selectedSetupModel),
-    )
-  }, [runSetupAction, selectedSetupModel])
-
-  const handleCompleteSetup = useCallback(async () => {
-    if (!localBackendRef.current) return
-    await runSetupAction("Saving setup status...", async () => {
-      await localBackendRef.current!.invoke("set-setup-completed", true)
-      return { success: true, message: "Local setup completed." }
-    })
-    setShowLocalSetupWizard(false)
-  }, [runSetupAction])
-
-  const useLocalBackend = processingMode === "local" && localBackendAvailable
 
   const handleUploadError = useCallback((error: UploadError) => {
     setWorkflowError(error)
@@ -628,58 +257,6 @@ function HomePageContent() {
     setSessionId(null)
     resetQueue()
   }, [resetQueue])
-
-  const buildNoteFromMeeting = useCallback((meeting: BackendProcessingEvent["meetingData"], visitReason?: string) => {
-    if (!meeting) return ""
-    if (meeting.clinical_note && meeting.clinical_note.trim()) return meeting.clinical_note
-
-    const summary = meeting.summary || ""
-    const keyPoints = meeting.key_points || []
-    const actionItems = meeting.action_items || []
-    const templateName = templateForVisitReason(visitReason || meeting.session_info?.note_type)
-
-    if (templateName === "soap") {
-      return [
-        "# SOAP Note",
-        "",
-        "## Subjective",
-        "### Chief Complaint",
-        "",
-        "### History of Present Illness",
-        summary || "",
-        "",
-        "### Review of Systems",
-        "",
-        "## Objective",
-        "### Physical Examination",
-        "",
-        "## Assessment",
-        keyPoints.length ? keyPoints.map((p) => `- ${p}`).join("\n") : "",
-        "",
-        "## Plan",
-        actionItems.length ? actionItems.map((p) => `- ${p}`).join("\n") : "",
-      ].join("\n")
-    }
-
-    return [
-      "# Clinical Note",
-      "",
-      "## Chief Complaint",
-      "",
-      "## History of Present Illness",
-      summary || "",
-      "",
-      "## Review of Systems",
-      "",
-      "## Physical Exam",
-      "",
-      "## Assessment",
-      keyPoints.length ? keyPoints.map((p) => `- ${p}`).join("\n") : "",
-      "",
-      "## Plan",
-      actionItems.length ? actionItems.map((p) => `- ${p}`).join("\n") : "",
-    ].join("\n")
-  }, [])
 
   const handleSegmentReady = useCallback(
     (segment: RecordedSegment) => {
@@ -779,21 +356,18 @@ function HomePageContent() {
 
   // Stable refs to avoid EventSource recreation
   const encountersRef = useRef(encounters)
-  const noteLengthRef = useRef(noteLength)
   const refreshRef = useRef(refresh)
-  
+
   useEffect(() => {
     encountersRef.current = encounters
-    noteLengthRef.current = noteLength
     refreshRef.current = refresh
-  }, [encounters, noteLength, refresh])
+  }, [encounters, refresh])
 
   const processEncounterForNoteGeneration = useCallback(
     async (encounterId: string, transcript: string) => {
       const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
       const patientName = enc?.patient_name || ""
       const visitReason = enc?.visit_reason || ""
-      const template = templateForVisitReason(visitReason)
 
       debugLog("\n" + "=".repeat(80))
       debugLog("GENERATING CLINICAL NOTE")
@@ -801,7 +375,6 @@ function HomePageContent() {
       debugLog(`Encounter ID: ${encounterId}`)
       debugLogPHI(`Patient: ${patientName || "Unknown"}`)
       debugLogPHI(`Visit Reason: ${visitReason || "Not provided"}`)
-      debugLog(`Note Length: ${noteLengthRef.current}`)
       debugLog(`Transcript length: ${transcript.length} characters`)
       debugLog("=".repeat(80) + "\n")
 
@@ -816,8 +389,6 @@ function HomePageContent() {
           transcript,
           patient_name: patientName,
           visit_reason: visitReason,
-          noteLength: noteLengthRef.current,
-          template,
         })
         await updateEncounterRef.current(encounterId, {
           note_text: note,
@@ -935,8 +506,8 @@ function HomePageContent() {
   }, [])
 
   useEffect(() => {
-    if (!sessionId || useLocalBackend) return
-    
+    if (!sessionId) return
+
     debugLog('[EventSource] Connecting to session:', sessionId)
     const baseUrl = apiBaseUrlRef.current
     const streamUrl = baseUrl
@@ -963,8 +534,8 @@ function HomePageContent() {
         eventSourceRef.current = null
       }
     }
-  }, [handleFinalEvent, handleSegmentEvent, handleStreamError, sessionId, useLocalBackend])
-  
+  }, [handleFinalEvent, handleSegmentEvent, handleStreamError, sessionId])
+
   // Cleanup EventSource on page unload/refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -974,7 +545,7 @@ function HomePageContent() {
         eventSourceRef.current = null
       }
     }
-    
+
     const handleVisibilityChange = () => {
       // If page becomes hidden and we're not actively recording, cleanup
       if (document.hidden && view.type !== 'recording') {
@@ -985,10 +556,10 @@ function HomePageContent() {
         }
       }
     }
-    
+
     window.addEventListener('beforeunload', handleBeforeUnload)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -1015,30 +586,11 @@ function HomePageContent() {
     visit_reason: string
   }) => {
     try {
-      if (useLocalBackend) {
-        const readiness = await ensureLocalRuntimeReady()
-        if (!readiness.ok) {
-          return
-        }
-      }
-      if (!useLocalBackend && !hasAnthropicApiKey) {
-        setShowMixedKeyPrompt(true)
-        setShowSettingsDialog(true)
-        return
-      }
-      if (!useLocalBackend) {
-        const readiness = await ensureMixedRuntimeReady(true)
-        if (!readiness.ok) {
-          return
-        }
-      }
       const micReady = await runMicReadinessCheck(true)
       if (!micReady) {
         return
       }
-      if (!useLocalBackend) {
-        cleanupSession()
-      }
+      cleanupSession()
       finalTranscriptRef.current = ""
       finalRecordingRef.current = null
       setTranscriptionErrorMessage("")
@@ -1047,9 +599,7 @@ function HomePageContent() {
       setProcessingMetrics({})
 
       const session = crypto.randomUUID()
-      if (!useLocalBackend) {
-        startNewSession(session)
-      }
+      startNewSession(session)
 
       const encounter = await addEncounter({
         ...data,
@@ -1063,22 +613,7 @@ function HomePageContent() {
       setView({ type: "recording", encounterId: encounter.id })
       setTranscriptionStatus("in-progress")
       setWorkflowError(null)
-      if (!useLocalBackend && localBackendRef.current) {
-        const whisperReady = await localBackendRef.current.invoke("ensure-whisper-service")
-        if (!(whisperReady as { success?: boolean }).success) {
-          throw new Error((whisperReady as { error?: string }).error || "Whisper service unavailable")
-        }
-      }
-      if (useLocalBackend && localBackendRef.current) {
-        const sessionName = `DiSCaScribe ${encounter.id}`
-        localSessionNameRef.current = sessionName
-        setLocalDurationMs(0)
-        setLocalPaused(false)
-        localLastTickRef.current = Date.now()
-        await localBackendRef.current.invoke("start-recording-ui", sessionName, data.visit_reason)
-      } else {
-        await startRecording()
-      }
+      await startRecording()
     } catch (err) {
       debugError("Failed to start recording:", err)
       const message = err instanceof Error ? err.message.toLowerCase() : ""
@@ -1235,16 +770,6 @@ function HomePageContent() {
     file: File,
   ) => {
     try {
-      if (!hasAnthropicApiKey) {
-        setShowMixedKeyPrompt(true)
-        setShowSettingsDialog(true)
-        return
-      }
-      const readiness = await ensureMixedRuntimeReady(true)
-      if (!readiness.ok) {
-        return
-      }
-
       cleanupSession()
       finalTranscriptRef.current = ""
       finalRecordingRef.current = null
@@ -1305,18 +830,6 @@ function HomePageContent() {
       transcriptionStartedAt: Date.now(),
     })
 
-    if (useLocalBackend && localBackendRef.current) {
-      // Local backend processes in sequence (transcription -> note generation).
-      // Keep note generation pending until backend emits stage updates.
-      setTranscriptionErrorMessage("")
-      setTranscriptionStatus("in-progress")
-      setNoteGenerationStatus("pending")
-      await localBackendRef.current.invoke("stop-recording-ui")
-      localLastTickRef.current = null
-      setLocalPaused(false)
-      return
-    }
-
     const audioBlob = await stopRecording()
     if (!audioBlob) {
       setTranscriptionErrorMessage("No recording captured. Check microphone input/device and retry.")
@@ -1341,93 +854,14 @@ function HomePageContent() {
   }
 
   const handlePauseRecording = async () => {
-    if (useLocalBackend && localBackendRef.current) {
-      await localBackendRef.current.invoke("pause-recording-ui")
-      setLocalPaused(true)
-      return
-    }
     await pauseRecording()
   }
 
   const handleResumeRecording = async () => {
-    if (useLocalBackend && localBackendRef.current) {
-      await localBackendRef.current.invoke("resume-recording-ui")
-      setLocalPaused(false)
-      localLastTickRef.current = Date.now()
-      return
-    }
     await resumeRecording()
   }
 
   const handleRetryTranscription = async () => {
-    if (useLocalBackend && localBackendRef.current) {
-      const meeting = lastMeetingDataRef.current
-      const summaryFile = meeting?.session_info?.summary_file as string | undefined
-      if (!summaryFile) {
-        setWorkflowError(createPipelineError("storage_error", "Unable to find meeting summary for retry", false))
-        setTranscriptionStatus("failed")
-        return
-      }
-      setWorkflowError(null)
-      setTranscriptionStatus("in-progress")
-      setNoteGenerationStatus("pending")
-      setProcessingMetrics({
-        processingStartedAt: Date.now(),
-        transcriptionStartedAt: Date.now(),
-      })
-      try {
-        await localBackendRef.current.invoke("reprocess-meeting", summaryFile)
-        const result = await localBackendRef.current.invoke("list-meetings")
-        const parsed = result as { success?: boolean; meetings?: BackendProcessingEvent["meetingData"][] }
-        const refreshed = parsed?.meetings?.find((m) => m?.session_info?.summary_file === summaryFile)
-        if (refreshed && currentEncounterIdRef.current) {
-          lastMeetingDataRef.current = refreshed
-          const transcript = refreshed.transcript || ""
-          const encounter = encountersRef.current.find((e: Encounter) => e.id === currentEncounterIdRef.current)
-          const noteText = buildNoteFromMeeting(refreshed, encounter?.visit_reason)
-          await updateEncounterRef.current(currentEncounterIdRef.current, {
-            status: "completed",
-            transcript_text: transcript,
-            note_text: noteText,
-          })
-          setTranscriptionStatus("done")
-          setNoteGenerationStatus("done")
-          setProcessingMetrics((prev) => ({
-            ...prev,
-            transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
-            noteGenerationStartedAt: prev.noteGenerationStartedAt ?? Date.now(),
-            noteGenerationEndedAt: Date.now(),
-            processingEndedAt: Date.now(),
-          }))
-          setView({ type: "viewing", encounterId: currentEncounterIdRef.current })
-        } else {
-          setTranscriptionStatus("failed")
-          setNoteGenerationStatus("failed")
-          setProcessingMetrics((prev) => ({
-            ...prev,
-            transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
-            processingEndedAt: Date.now(),
-          }))
-        }
-      } catch (error) {
-        setWorkflowError(
-          toPipelineError(error, {
-            code: "transcription_error",
-            message: "Failed to retry transcription",
-            recoverable: true,
-          }),
-        )
-        setTranscriptionStatus("failed")
-        setNoteGenerationStatus("failed")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
-          processingEndedAt: Date.now(),
-        }))
-      }
-      return
-    }
-
     const blob = finalRecordingRef.current
     const activeSessionId = sessionIdRef.current
     if (!blob || !activeSessionId) return
@@ -1442,9 +876,6 @@ function HomePageContent() {
   }
 
   const handleRetryNoteGeneration = async () => {
-    if (useLocalBackend) {
-      return
-    }
     const transcript = finalTranscriptRef.current
     const encounterId = currentEncounter?.id
     if (!encounterId || !transcript) return
@@ -1457,159 +888,6 @@ function HomePageContent() {
     }))
     await processEncounterForNoteGeneration(encounterId, transcript)
   }
-
-  useEffect(() => {
-    if (!localBackendRef.current) return
-    const backend = localBackendRef.current
-    const progressHandler = (_event: unknown, payload: unknown) => {
-      const data = payload as { model?: string; progress?: string }
-      if (data?.progress) {
-        setSetupStatusMessage(`${data.model || "Model"}: ${data.progress}`)
-      }
-    }
-    backend.on("model-pull-progress", progressHandler)
-    return () => {
-      backend.removeAllListeners("model-pull-progress")
-    }
-  }, [localBackendAvailable])
-
-  useEffect(() => {
-    if (!useLocalBackend || !localBackendRef.current) return
-
-    const backend = localBackendRef.current
-    const stageHandler = (_event: unknown, payload: unknown) => {
-      const data = payload as {
-        stage?: string
-        status?: StepStatus
-        startedAtMs?: number
-        endedAtMs?: number
-        durationMs?: number
-      }
-      const stageTs = data?.startedAtMs || Date.now()
-      if (data?.stage === "transcription" && data.status === "in-progress") {
-        setTranscriptionStatus("in-progress")
-        setNoteGenerationStatus("pending")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          processingStartedAt: prev.processingStartedAt ?? stageTs,
-          transcriptionStartedAt: prev.transcriptionStartedAt ?? stageTs,
-        }))
-        return
-      }
-      if (data?.stage === "transcription" && data.status === "done") {
-        const endedAt = data.endedAtMs || Date.now()
-        const duration = typeof data.durationMs === "number" ? data.durationMs : undefined
-        setTranscriptionStatus("done")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          processingStartedAt: prev.processingStartedAt ?? (duration ? endedAt - duration : endedAt),
-          transcriptionStartedAt: prev.transcriptionStartedAt ?? (duration ? endedAt - duration : endedAt),
-          transcriptionEndedAt: endedAt,
-        }))
-        return
-      }
-      if (data?.stage === "note_generation" && data.status === "in-progress") {
-        setTranscriptionStatus("done")
-        setNoteGenerationStatus("in-progress")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          transcriptionEndedAt: prev.transcriptionEndedAt ?? stageTs,
-          noteGenerationStartedAt: prev.noteGenerationStartedAt ?? stageTs,
-        }))
-        return
-      }
-      if (data?.stage === "note_generation" && data.status === "done") {
-        const endedAt = data.endedAtMs || Date.now()
-        const duration = typeof data.durationMs === "number" ? data.durationMs : undefined
-        setNoteGenerationStatus("done")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          noteGenerationStartedAt: prev.noteGenerationStartedAt ?? (duration ? endedAt - duration : endedAt),
-          noteGenerationEndedAt: endedAt,
-        }))
-      }
-    }
-
-    const handler = async (_event: unknown, payload: unknown) => {
-      const data = payload as BackendProcessingEvent
-      const encounterId = currentEncounterIdRef.current
-      if (!encounterId) return
-
-      if (!data.success) {
-        setWorkflowError(
-          createPipelineError("transcription_error", data.error || "Transcription failed", true, {
-            stage: "transcription",
-          }),
-        )
-        setTranscriptionStatus("failed")
-        setNoteGenerationStatus("failed")
-        setProcessingMetrics((prev) => ({
-          ...prev,
-          transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
-          processingEndedAt: Date.now(),
-        }))
-        await updateEncounterRef.current(encounterId, { status: "transcription_failed" })
-        return
-      }
-
-      const meeting = data.meetingData
-      lastMeetingDataRef.current = meeting ?? null
-      const transcript = meeting?.transcript || ""
-      if (isBlankTranscriptText(transcript)) {
-        setTranscriptionErrorMessage("No speech signal detected. Check microphone input/device and retry.")
-        setTranscriptionStatus("failed")
-        setNoteGenerationStatus("pending")
-        await updateEncounterRef.current(encounterId, { status: "transcription_failed" })
-        return
-      }
-      const encounter = encountersRef.current.find((e: Encounter) => e.id === encounterId)
-      const noteText = buildNoteFromMeeting(meeting, encounter?.visit_reason)
-      const durationSeconds = meeting?.session_info?.duration_seconds
-
-      finalTranscriptRef.current = transcript
-      setTranscriptionErrorMessage("")
-
-      await updateEncounterRef.current(encounterId, {
-        status: "completed",
-        transcript_text: transcript,
-        note_text: noteText,
-        recording_duration: durationSeconds ? Math.round(durationSeconds / 1000) : duration,
-      })
-
-      setTranscriptionStatus("done")
-      setNoteGenerationStatus("done")
-      setWorkflowError(null)
-      setProcessingMetrics((prev) => ({
-        ...prev,
-        transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
-        noteGenerationStartedAt: prev.noteGenerationStartedAt ?? Date.now(),
-        noteGenerationEndedAt: Date.now(),
-        processingEndedAt: Date.now(),
-      }))
-      setView({ type: "viewing", encounterId })
-    }
-
-    backend.on("processing-stage", stageHandler)
-    backend.on("processing-complete", handler)
-    return () => {
-      backend.removeAllListeners("processing-stage")
-      backend.removeAllListeners("processing-complete")
-    }
-  }, [buildNoteFromMeeting, duration, isBlankTranscriptText, useLocalBackend])
-
-  useEffect(() => {
-    if (!useLocalBackend || view.type !== "recording") return
-    const tick = () => {
-      const now = Date.now()
-      if (localLastTickRef.current && !localPaused) {
-        setLocalDurationMs((prev) => prev + (now - localLastTickRef.current!))
-      }
-      localLastTickRef.current = now
-    }
-    tick()
-    const interval = window.setInterval(tick, 250)
-    return () => window.clearInterval(interval)
-  }, [useLocalBackend, localPaused, view.type])
 
   const currentEncounter = encounters.find((e: Encounter) => "encounterId" in view && e.id === view.encounterId)
   const selectedEncounter = view.type === "viewing" ? encounters.find((e: Encounter) => e.id === view.encounterId) : null
@@ -1650,7 +928,7 @@ function HomePageContent() {
             <NewEncounterForm
               onStart={handleStartRecording}
               onCancel={handleCancelNew}
-              onUpload={useLocalBackend ? undefined : handleUploadRecording}
+              onUpload={handleUploadRecording}
             />
           </div>
         )
@@ -1660,8 +938,8 @@ function HomePageContent() {
             <RecordingView
               patientName={currentEncounter?.patient_name || ""}
               patientId={currentEncounter?.patient_id || ""}
-              duration={useLocalBackend ? Math.floor(localDurationMs / 1000) : duration}
-              isPaused={useLocalBackend ? localPaused : isPaused}
+              duration={duration}
+              isPaused={isPaused}
               onStop={handleStopRecording}
               onPause={handlePauseRecording}
               onResume={handleResumeRecording}
@@ -1699,39 +977,16 @@ function HomePageContent() {
 
   return (
     <>
-      <LocalSetupWizard
-        isOpen={showLocalSetupWizard}
-        checks={setupChecks}
-        selectedModel={selectedSetupModel}
-        supportedModels={supportedModels}
-        isBusy={setupBusy}
-        statusMessage={setupStatusMessage}
-        onSelectedModelChange={setSelectedSetupModel}
-        onRunCheck={handleRunSetupCheck}
-        onDownloadWhisper={handleDownloadWhisper}
-        onDownloadModel={handleDownloadSetupModel}
-        onComplete={handleCompleteSetup}
-        onSkip={() => setShowLocalSetupWizard(false)}
-      />
       {showPermissionsDialog && (
         <PermissionsDialog onComplete={handlePermissionsComplete} preferredInputDeviceId={preferredInputDeviceId} />
       )}
       <SettingsDialog
         isOpen={showSettingsDialog}
         onClose={handleCloseSettings}
-        noteLength={noteLength}
-        onNoteLengthChange={handleNoteLengthChange}
-        processingMode={processingMode}
-        onProcessingModeChange={handleProcessingModeChange}
-        localBackendAvailable={localBackendAvailable}
-        anthropicApiKey={anthropicApiKeyInput}
-        onAnthropicApiKeyChange={setAnthropicApiKeyInput}
-        onSaveAnthropicApiKey={handleSaveAnthropicApiKey}
         audioInputDevices={audioInputDevices}
         preferredInputDeviceId={preferredInputDeviceId}
         onPreferredInputDeviceChange={handlePreferredInputDeviceChange}
         micPermissionStatus={micPermissionStatus}
-        mixedAuthSource={mixedAuthSource}
         lastMicReadinessMessage={lastMicReadiness?.userMessage || (lastMicReadiness?.success ? "Ready" : "")}
         lastMicReadinessMetrics={lastMicReadiness?.metrics || null}
         lastFailureCode={lastFailureCode}
@@ -1739,119 +994,6 @@ function HomePageContent() {
           await runMicReadinessCheck(true)
         }}
       />
-      {showMixedKeyPrompt && processingMode === "mixed" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
-          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
-            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Anthropic Key Required for Mixed Mode</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Mixed mode uses Claude for note generation. Add your Anthropic key in Settings, or switch to local-only mode.
-            </p>
-            <div className="mt-5 flex gap-3">
-              <button
-                type="button"
-                className="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-                onClick={() => {
-                  setShowMixedKeyPrompt(false)
-                  setShowSettingsDialog(true)
-                }}
-              >
-                Add Key in Settings
-              </button>
-              <button
-                type="button"
-                disabled={!localBackendAvailable}
-                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={async () => {
-                  if (!localBackendAvailable) return
-                  const switched = await handleProcessingModeChange("local")
-                  if (switched) {
-                    setShowMixedKeyPrompt(false)
-                    setShowSettingsDialog(false)
-                  }
-                }}
-              >
-                Switch to Local-only
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showMixedRuntimePrompt && processingMode === "mixed" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
-          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
-            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Mixed Mode Not Ready</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {mixedRuntimePromptMessage || "Whisper runtime is not ready yet."}
-            </p>
-            {mixedRuntimePromptCode && (
-              <p className="mt-2 text-xs text-muted-foreground">Code: {mixedRuntimePromptCode}</p>
-            )}
-            <div className="mt-5 flex gap-3">
-              <button
-                type="button"
-                className="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-                onClick={async () => {
-                  const readiness = await ensureMixedRuntimeReady(true)
-                  if (readiness.ok) {
-                    setShowMixedRuntimePrompt(false)
-                  }
-                }}
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong"
-                onClick={() => {
-                  setShowMixedRuntimePrompt(false)
-                  setShowSettingsDialog(true)
-                }}
-              >
-                Open Settings
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showLocalRuntimePrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 p-4 backdrop-blur-sm">
-          <div className="animate-scale-in w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-lifted surface">
-            <h3 className="font-display text-xl font-medium tracking-tight text-foreground">Local Mode Not Ready</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {localRuntimePromptMessage || "Local runtime checks failed."}
-            </p>
-            {localRuntimePromptCode && (
-              <p className="mt-2 text-xs text-muted-foreground">Code: {localRuntimePromptCode}</p>
-            )}
-            <div className="mt-5 flex gap-3">
-              <button
-                type="button"
-                className="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-                onClick={() => {
-                  setShowLocalRuntimePrompt(false)
-                  setShowLocalSetupWizard(true)
-                }}
-              >
-                Open Local Setup
-              </button>
-              <button
-                type="button"
-                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-soft hover:bg-brand-strong"
-                onClick={async () => {
-                  setShowLocalRuntimePrompt(false)
-                  await handleProcessingModeChange("mixed")
-                  if (!hasAnthropicApiKey) {
-                    setShowSettingsDialog(true)
-                    setShowMixedKeyPrompt(true)
-                  }
-                }}
-              >
-                Stay on Mixed
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {httpsWarning && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-destructive px-4 py-2 text-center text-sm font-semibold text-destructive-foreground">
           {httpsWarning}
@@ -1867,7 +1009,7 @@ function HomePageContent() {
             onDeleteEncounter={handleDeleteEncounter}
             disabled={view.type === "recording"}
           />
-          <ModelIndicator processingMode={processingMode} />
+          <ModelIndicator />
           <SettingsBar onOpenSettings={handleOpenSettings} />
         </div>
         <main className="flex flex-1 flex-col overflow-hidden bg-background">

@@ -14,7 +14,6 @@ const allowedRootDirs = new Set([
   "docker",
   "docs",
   "infra",
-  "local-only",
   "models",
   "output",
   "recordings",

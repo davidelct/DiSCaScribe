@@ -64,9 +64,6 @@ jobs:
       - name: Unit Tests
         run: pnpm test:llm
 
-      - name: Desktop IPC Contract Test
-        run: pnpm test:e2e:desktop:ipc
-
       - name: Detect dependency manifest changes
         id: dep-scope
         run: |

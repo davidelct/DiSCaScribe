@@ -5,32 +5,13 @@
 
 import { writeAuditEntry } from "./audit-log"
 
-export type NoteLength = "short" | "long"
-export type ProcessingMode = "mixed" | "local"
-
 export interface UserPreferences {
-  noteLength: NoteLength
-  processingMode: ProcessingMode
   preferredInputDeviceId?: string
 }
 
 const PREFERENCES_KEY = "openscribe_preferences"
 
-function resolveDefaultProcessingMode(): ProcessingMode {
-  if (typeof window === "undefined") return "mixed"
-
-  const override = process.env.NEXT_PUBLIC_OPENSCRIBE_DESKTOP_DEFAULT_MODE?.trim().toLowerCase()
-  if (override === "local" || override === "mixed") {
-    return override
-  }
-
-  // Desktop default is mixed mode. Browser/web also defaults to mixed.
-  return "mixed"
-}
-
 const DEFAULT_PREFERENCES: UserPreferences = {
-  noteLength: "long",
-  processingMode: "mixed",
   preferredInputDeviceId: "",
 }
 
@@ -47,14 +28,10 @@ export function getPreferences(): UserPreferences {
     const parsed = JSON.parse(stored) as Partial<UserPreferences>
     return {
       ...DEFAULT_PREFERENCES,
-      processingMode: resolveDefaultProcessingMode(),
       ...parsed,
     }
   } catch {
-    return {
-      ...DEFAULT_PREFERENCES,
-      processingMode: resolveDefaultProcessingMode(),
-    }
+    return DEFAULT_PREFERENCES
   }
 }
 
