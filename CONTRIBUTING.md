@@ -47,8 +47,7 @@ High-priority contribution areas:
    ```
 5. Start the dev server:
    ```bash
-   pnpm dev          # Web app
-   pnpm dev:desktop  # Desktop app
+   pnpm dev   # Web app at http://localhost:3001
    ```
 
 ### Making Changes
@@ -88,7 +87,6 @@ High-priority contribution areas:
 - `packages/ui/` – Shared React components
 - `packages/storage/` – Encrypted storage + encounter management
 - `packages/llm/` – Provider-agnostic LLM client
-- `packages/shell/` – Electron main process
 - `config/` – Shared configuration files
 
 See [architecture.md](./architecture.md) for detailed architecture documentation.

@@ -1,7 +1,7 @@
 # Deploying the DiSCaScribe web demo to Vercel (free / Hobby)
 
 This hosts the web app at a public URL (e.g. `scribe.disca.ai`), behind a single
-shared password, with the OpenAI + Anthropic keys held server-side so users never
+shared password, with the Deepgram + Anthropic keys held server-side so users never
 provide their own. **Demo / synthetic data only** — see "Before real PHI" below.
 
 No Cloudflare required. Everything below runs on Vercel's free Hobby plan.
@@ -13,12 +13,12 @@ No Cloudflare required. Everything below runs on Vercel's free Hobby plan.
 - The app reads both API keys from **server-side environment variables**
   (`apps/web/src/app/actions.ts`, `packages/storage/src/server-api-keys.ts`).
   Keys never reach the browser. Users just use the app.
-- Transcription is set to the **OpenAI hosted Whisper API**
-  (`TRANSCRIPTION_PROVIDER=whisper_openai`), so there is **no local Python/GPU
+- Transcription is set to the **Deepgram pre-recorded API**
+  (`TRANSCRIPTION_PROVIDER=deepgram`), so there is **no local Python/GPU
   backend** to run — it's a pure cloud deploy.
 - All patient data stays in **each user's browser** (encrypted `localStorage`).
   There is no server database. PHI only passes through the server transiently on
-  its way to OpenAI/Anthropic.
+  its way to Deepgram/Anthropic.
 - A shared-password gate (`apps/web/src/middleware.ts` + `/login`) locks the whole
   site, including the API routes, whenever `DEMO_PASSWORD` is set.
 
@@ -41,8 +41,9 @@ No Cloudflare required. Everything below runs on Vercel's free Hobby plan.
    |---|---|---|
    | `DEMO_PASSWORD` | *your shared password* | Turns the login wall on. |
    | `ANTHROPIC_API_KEY` | `sk-ant-…` | Note generation. |
-   | `OPENAI_API_KEY` | `sk-proj-…` | Whisper transcription. |
-   | `TRANSCRIPTION_PROVIDER` | `whisper_openai` | Cloud transcription, no local backend. |
+   | `DEEPGRAM_API_KEY` | *your Deepgram key* | Diarized transcription. |
+   | `DEEPGRAM_MODEL` | `nova-3` | Optional; transcription model. |
+   | `TRANSCRIPTION_PROVIDER` | `deepgram` | Cloud transcription, no local backend. |
    | `NEXT_PUBLIC_SECURE_STORAGE_KEY` | `openssl rand -base64 32` | Build-time; client storage encryption. |
 
    `NODE_ENV=production` is set by Vercel automatically (needed for the secure
@@ -86,7 +87,7 @@ unless `DEMO_PASSWORD` is set).
 
 This setup is fine for synthetic data. Before any real patient data:
 
-- **BAAs** with OpenAI and Anthropic (their keys = PHI flows under your accounts).
+- **BAAs** with Deepgram and Anthropic (their keys = PHI flows under your accounts).
 - Replace the shared password with per-user auth (Clerk/Auth0 email OTP, or
   Cloudflare Access like `../dashboards`).
 - Add per-user rate/cost limits (your keys pay for every user's usage).

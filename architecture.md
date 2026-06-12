@@ -28,7 +28,7 @@ No other source files should sit at the root—add them to the appropriate
 
   ```
   apps/web/
-    .env.local              # app-specific secrets (OPENAI_API_KEY, NEXT_PUBLIC_SECURE_STORAGE_KEY)
+    .env.local              # app-specific secrets (DEEPGRAM_API_KEY, ANTHROPIC_API_KEY, NEXT_PUBLIC_SECURE_STORAGE_KEY)
     next-env.d.ts
     next.config.mjs         # re-exports config/next.config.mjs
     postcss.config.mjs      # re-exports config/postcss.config.mjs
@@ -72,12 +72,12 @@ packages/pipeline/
 
 * **audio-ingest** – microphone/system audio capture hooks, resamplers,
   worklets, permission helpers.
-* **transcribe** – Whisper adapters, segment uploader hook, WAV parsing.
+* **transcribe** – transcription provider adapters (default Deepgram, chosen by
+  `TRANSCRIPTION_PROVIDER`), segment uploader hook, WAV parsing.
 * **assemble** – streaming session store, SSE helpers, overlap
-  trimming, diarization scaffolding.
-* **note-core** – markdown-based clinical note generation using templates,
+  trimming, diarization handling.
+* **note-core** – clinical note generation (single SOAP-format prompt),
   parsing/formatting logic, LLM orchestration (calls into `@llm`).
-  Uses `.md` templates for easy customization.
 * **render** – React components for presenting structured notes and
   exporters (SOAP renderer, specialty variants).
 * **medgemma-scribe** – fully local, text-only MedGemma scribe workflow.
@@ -88,36 +88,13 @@ packages/pipeline/
 
 When expanding the pipeline (e.g., add “07_quality_control” or “08_storage”),
 create another subdirectory and add a new path alias if needed.
-#### Customizing Clinical Note Templates
-
-Contributors can customize note formats by editing markdown templates in
-`packages/llm/src/prompts/clinical-note/templates/`:
-
-* `default.md` – Standard clinical note (Chief Complaint, HPI, ROS, PE, Assessment, Plan)
-* `soap.md` – SOAP note format (Subjective/Objective/Assessment/Plan)
-
-To add a custom template:
-1. Create `packages/llm/src/prompts/clinical-note/templates/my-template.md`
-2. Add to `templates/index.ts`: `export function getMyTemplate(): string { return loadTemplate('my-template') }`
-3. Use in note generation:
-   ```typescript
-   await createClinicalNoteText({
-     transcript,
-     patient_name,
-     visit_reason,
-     template: 'my-template'
-   })
-   ```
-
-No JSON schemas or TypeScript interfaces required—just edit the markdown structure.
-<!-- See [MIGRATION_MARKDOWN.md](MIGRATION_MARKDOWN.md) for complete migration details. -->
 
 ### `packages/ui`
 
 Reusable React components, hooks, and UI utilities consumed by the apps.
 Examples: encounter list, recording view, shared buttons, Radix wrappers,
 `useEncounters` hook. UI-only work that is not tied to Next-specific routing
-belongs here so other apps (Electron, mobile) can reuse it.
+belongs here so other apps (e.g. mobile) can reuse it.
 
 ### `packages/storage`
 
@@ -132,82 +109,14 @@ the current browser implementation; apps keep importing `@storage/*`.
 
 ### `packages/llm`
 
-Provider-agnostic LLM abstraction plus versioned prompt templates.
+Provider-agnostic LLM abstraction plus versioned prompts.
 Today it exposes a thin wrapper around Anthropic Claude via `runLLMRequest`,
-and includes markdown-based clinical note templates in
-`src/prompts/clinical-note/templates/`. Contributors can customize note
-formats by editing `.md` template files without touching code.
+and the clinical-note prompt in `src/prompts/clinical-note/` (a single
+SOAP-format prompt).
 
 Future expansion:
 * Additional providers (OpenAI, Azure, local models).
-* More template variants (SOAP, DAP, specialty-specific).
 * Retry/rate-limiting/shared logging for LLM calls.
-
-### `packages/shell`
-
-Electron "main" process, preload scripts, IPC contracts, desktop packaging
-scripts (`scripts/prepare-next.js`, `next-server.js`). When the desktop app
-gains new OS integrations (screen capture, auto-update, etc.), the code lives
-here. Renderer UI should continue to import from `packages/ui`/pipeline rather
-than duplicating logic.
-
-#### Desktop Build: node_modules Workaround
-
-**Problem**: electron-builder has a known issue ([#3104](https://github.com/electron-userland/electron-builder/issues/3104))
-where it ignores directories named `node_modules` in `extraResources`, even when
-explicitly configured. This caused the packaged Electron app to be missing the
-Next.js standalone `node_modules`, resulting in "Next.js server did not start
-after 20s" errors.
-
-**Solution**: A rename workaround implemented across three files:
-
-1. **`packages/shell/scripts/prepare-next.js` (lines 35-47)**
-   During build (`pnpm build:desktop`), this script renames
-   `apps/web/.next/standalone/node_modules` → `_node_modules` BEFORE
-   electron-builder packages the app. electron-builder successfully copies
-   `_node_modules` since it doesn't trigger the ignore pattern.
-
-2. **`packages/shell/next-server.js` (lines 17-41)**
-   At runtime when the app launches, `resolveStandaloneDir()` checks if
-   `_node_modules` exists and renames it back to `node_modules` so the Next.js
-   server can find its dependencies.
-
-3. **`.electronignore`**
-   Created to provide more specific ignore rules for electron-builder (ignores
-   root `/node_modules` but not nested ones).
-
-**Build Flow**:
-```
-pnpm build:desktop
-  ↓
-Next.js creates standalone output with node_modules
-  ↓
-prepare-next.js renames: node_modules → _node_modules
-  ↓
-electron-builder packages everything (including _node_modules)
-  ↓
-DMG/ZIP/App created successfully
-```
-
-**Runtime Flow**:
-```
-User launches OpenScribe.app
-  ↓
-main.js runs → next-server.js calls resolveStandaloneDir()
-  ↓
-Detects _node_modules exists, renames to node_modules (once)
-  ↓
-Next.js server starts successfully with proper dependencies
-  ↓
-App window loads
-```
-
-**Why This Works Long-Term**:
-- The workaround is automatic—no manual steps needed for each build
-- Every `pnpm build:desktop` applies the rename during `prepare-next.js`
-- Every app launch restores `node_modules` at runtime (idempotent, safe)
-- Documented with code comments referencing electron-builder issue #3104
-- If electron-builder ever fixes the issue, the runtime rename becomes a no-op
 
 ### `packages/tests`
 
@@ -237,22 +146,9 @@ them via small stubs (similar to `apps/web/next.config.mjs`).
 Generated artifacts only. Expected subfolders:
 
 * `build/tests-dist/` – compiled test sources (`pnpm build:test`).
-* `build/dist/` – packaged binaries (Electron DMG/ZIP) when running
-  `pnpm build:desktop`.
 
 Next.js generates its standalone bundle under `apps/web/.next` (ignored by Git),
 so it no longer sits inside `build/`.
-
-To smoke test the standalone server without packaging the Electron app:
-
-```
-pnpm build
-node packages/shell/scripts/prepare-next.js
-PORT=4123 node apps/web/.next/standalone/apps/web/server.js
-```
-
-Then curl a static asset (e.g. `curl -I http://127.0.0.1:4123/_next/static/css/<file>.css`)
-to confirm Next is serving files correctly before running `pnpm build:desktop`.
 
 This directory should be safe to delete at any time and is git-ignored.
 
@@ -275,7 +171,9 @@ This directory should be safe to delete at any time and is git-ignored.
 * App-specific secrets live in `apps/web/.env.local` (ignored by Git). For
   example:
   ```
-  OPENAI_API_KEY=...
+  TRANSCRIPTION_PROVIDER=deepgram
+  DEEPGRAM_API_KEY=...
+  ANTHROPIC_API_KEY=...
   NEXT_PUBLIC_SECURE_STORAGE_KEY=base64-32-byte-secret
   ```
 * Provide defaults/template via `apps/web/.env.local.example`.
@@ -293,7 +191,7 @@ This directory should be safe to delete at any time and is git-ignored.
 **Implementation**:
 
 1. **External API Enforcement**:
-   - Whisper transcription API (`packages/pipeline/transcribe/src/providers/whisper-transcriber.ts`) validates HTTPS before sending audio data
+   - Transcription providers (e.g. `packages/pipeline/transcribe/src/providers/deepgram-transcriber.ts`) validate HTTPS before sending audio data
    - LLM API client (`packages/llm/src/index.ts`) validates HTTPS before sending transcript data
    - Both services reject non-HTTPS URLs with explicit security errors
 
@@ -307,7 +205,6 @@ This directory should be safe to delete at any time and is git-ignored.
    - Integration tests validate HTTPS usage in `packages/llm/src/__tests__/llm-integration.test.ts`
 
 **Deployment Recommendations**:
-- **Desktop app (Electron)**: Automatically uses `localhost` (HTTPS not required for local IPC)
 - **Self-hosted web**: Configure reverse proxy (nginx/Apache) with TLS certificates
 - **Development**: HTTP on localhost is acceptable (PHI stays local)
 - **Production web**: Always serve via HTTPS or block non-localhost access
@@ -339,7 +236,6 @@ Breaking these rules causes CI/local `pnpm lint` to fail, so prefer renaming/mov
    * Pipeline/domain logic → the appropriate `packages/pipeline/0x_*`
    * Persistence → `packages/storage`
    * LLM providers/prompts → `packages/llm`
-   * Desktop-only features → `packages/shell`
 2. Update aliases in `tsconfig.json` if a new package is added.
 3. Keep generated assets confined to `build/`.
 
@@ -355,7 +251,7 @@ This section provides a practical guide for day-to-day development work.
 ### Primary Development Locations
 
 **`apps/web/src/app/page.tsx`** ⭐⭐⭐  
-Main application orchestrator (~570 lines)
+Main application orchestrator
 - State management and workflow logic
 - View transitions (idle → recording → processing → viewing)
 - Integration point for all UI components
@@ -368,10 +264,11 @@ Server-side functions
 
 **`apps/web/src/app/api/`**  
 Next.js API routes
-- `settings/api-keys/` - API key management
 - `transcription/segment/` - Segment uploads
 - `transcription/final/` - Final transcription
+- `transcription/upload/` - Uploaded-file transcription
 - `transcription/stream/[sessionId]/` - SSE streaming
+- `settings/transcription-status/` - Active provider + live-segment flag
 - Edit when: changing API endpoints, adding new routes
 
 **`packages/ui/src/components/`** ⭐⭐⭐  
@@ -387,13 +284,10 @@ Reusable React components (edit frequently)
 - `settings-bar.tsx` - Settings toolbar
 - Edit when: UI changes, new components, component behavior changes
 
-**`packages/llm/src/prompts/clinical-note/templates/`** ⭐⭐⭐  
-Clinical note formats (markdown files, no code required)
-- `default.md` - Standard clinical note format
-- `soap.md` - SOAP note format
-- `README.md` - Template documentation
-- `index.ts` - Template loader
-- Edit when: changing note structure, adding new note formats
+**`packages/llm/src/prompts/clinical-note/v1.ts`** ⭐⭐⭐  
+The clinical-note prompt (single SOAP format)
+- `getSystemPrompt()` / `getUserPrompt()` - the prompt sent to Claude
+- Edit when: changing the SOAP note structure or instructions
 
 ### Occational Development Locations
 
@@ -405,10 +299,10 @@ Audio recording and capture
 - Edit when: recording bugs, new audio features, device support
 
 **`packages/pipeline/transcribe/src/`**  
-Whisper transcription integration
+Transcription integration
 - `core/` - Transcription engine
 - `hooks/` - React hooks (useSegmentUpload)
-- `providers/` - Whisper API adapters
+- `providers/` - Provider adapters (Deepgram, OpenAI Whisper, …)
 - `__tests__/` - Transcription tests
 - Edit when: transcription service changes, provider updates
 
@@ -430,10 +324,9 @@ Transcript assembly and streaming
 **`packages/storage/src/`**  
 Data persistence layer
 - `encounters.ts` - Encounter CRUD operations
-- `api-keys.ts` - API key storage
 - `preferences.ts` - User preferences
 - `secure-storage.ts` - AES-GCM encryption utilities
-- `server-api-keys.ts` - Server-side key management
+- `server-api-keys.ts` - Server-side key loading (env)
 - `types.ts` - Shared TypeScript types
 - Edit when: data structure changes, storage logic updates
 
@@ -473,15 +366,6 @@ Testing and evaluation framework
 - `types/` - Test type definitions
 - Edit when: adding tests, evaluation criteria
 
-**`packages/shell/`**  
-Electron desktop wrapper
-- `main.js` - Electron main process (window management, ~150 lines)
-- `next-server.js` - Next.js server startup (~150 lines)
-- `preload.js` - IPC bridge between renderer and main
-- `scripts/prepare-next.js` - Build prep (node_modules rename workaround)
-- `buildResources/` - App icons, installer assets
-- Edit when: desktop features, OS integrations, window behavior
-
 **`config/`**  
 Centralized tool configuration
 - `next.config.mjs` - Next.js config (CSP, headers, webpack aliases)
@@ -508,11 +392,10 @@ Centralized tool configuration
 |------|----------|
 | Main app behavior | `apps/web/src/app/page.tsx` |
 | UI component | `packages/ui/src/components/<component>.tsx` |
-| Note format/structure | `packages/llm/src/prompts/clinical-note/templates/<template>.md` |
+| SOAP note prompt | `packages/llm/src/prompts/clinical-note/v1.ts` |
 | Recording logic | `packages/pipeline/audio-ingest/src/` |
 | Transcription | `packages/pipeline/transcribe/src/` |
 | Data storage | `packages/storage/src/` |
 | API endpoint | `apps/web/src/app/api/` |
-| Desktop window | `packages/shell/main.js` |
 | Server action | `apps/web/src/app/actions.ts` |
 | Shared hook | `packages/ui/src/hooks/` |
