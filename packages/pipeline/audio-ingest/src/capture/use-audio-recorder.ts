@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { PipelineStageError, type PipelineError } from "../../../shared/src/error"
-import { requestSystemAudioStream } from "../devices/system-audio"
 import { toAudioIngestError } from "../errors"
 import {
   DEFAULT_OVERLAP_MS,
@@ -60,7 +59,6 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
   const [errorCode, setErrorCode] = useState<string | null>(null)
 
   const micStreamRef = useRef<MediaStream | null>(null)
-  const systemStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const processorRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null)
   const resamplerRef = useRef<StreamingResampler | null>(null)
@@ -108,8 +106,6 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
 
     micStreamRef.current?.getTracks().forEach((track) => track.stop())
     micStreamRef.current = null
-    systemStreamRef.current?.getTracks().forEach((track) => track.stop())
-    systemStreamRef.current = null
     resamplerRef.current = null
   }, [])
 
@@ -224,11 +220,6 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
         deviceIdHash: activeSettings?.deviceId ? String(activeSettings.deviceId).slice(-6) : "",
       })
 
-      const systemCapture = await requestSystemAudioStream()
-      const systemStream =
-        systemCapture && systemCapture.stream.getAudioTracks().length > 0 ? systemCapture.stream : null
-      systemStreamRef.current = systemStream
-
       const audioContext = new AudioContext()
       audioContextRef.current = audioContext
       resamplerRef.current = new StreamingResampler(audioContext.sampleRate, TARGET_SAMPLE_RATE)
@@ -238,18 +229,6 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
 
       const micSource = audioContext.createMediaStreamSource(microphoneStream)
       micSource.connect(mixNode)
-
-      if (systemStream) {
-        try {
-          const systemSource = audioContext.createMediaStreamSource(systemStream)
-          systemSource.connect(mixNode)
-          systemStream.getVideoTracks().forEach((track) => track.stop())
-        } catch (error) {
-          console.warn("Failed to add system audio source", error)
-        }
-      } else if (typeof window !== "undefined" && window.desktop) {
-        console.warn("System audio capture unavailable; falling back to microphone only")
-      }
 
       await setupProcessor(audioContext, mixNode)
 

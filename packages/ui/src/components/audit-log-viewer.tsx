@@ -5,7 +5,6 @@ import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
 import type { AuditLogEntry, AuditLogFilter, AuditEventType } from "@storage/types"
 import { getAuditEntries, exportAuditLog, flushAuditQueue } from "@storage/audit-log"
-import { debugLog } from "@storage/debug-logger"
 
 interface AuditLogViewerProps {
   onClose: () => void
@@ -43,29 +42,15 @@ export function AuditLogViewer({ onClose }: AuditLogViewerProps) {
       const blob = await exportAuditLog(format, filter)
       const filename = `audit-log-${new Date().toISOString().split("T")[0]}.${format}`
 
-      // Check if running in Electron
-      if (window.desktop?.auditLog?.exportLog) {
-        // Use Electron save dialog
-        const text = await blob.text()
-        const result = await window.desktop.auditLog.exportLog({
-          data: text,
-          filename,
-        })
-
-        if (result.success && !result.canceled) {
-          debugLog("audit", `Exported audit log to ${result.filePath}`)
-        }
-      } else {
-        // Browser download
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      }
+      // Browser download
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (error) {
       console.error("Failed to export audit log:", error)
     } finally {

@@ -11,7 +11,7 @@ import {
 import type { Encounter } from "@storage/types"
 import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, useHttpsWarning } from "@ui"
 import { NoteEditor } from "@note-rendering"
-import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, warmupSystemAudioPermission, compressAudioFileToMp3 } from "@audio"
+import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
 import { useSegmentUpload, type UploadError } from "@transcription";
 import { WorkflowErrorDisplay } from "./workflow-error-display"
 import { generateClinicalNote } from "@/app/actions"
@@ -153,7 +153,6 @@ function HomePageContent() {
     if (permissionsPrimedRef.current) return
     permissionsPrimedRef.current = true
     void warmupMicrophonePermission()
-    void warmupSystemAudioPermission()
     void refreshMicPermissionStatus()
   }, [refreshMicPermissionStatus])
 
@@ -204,7 +203,6 @@ function HomePageContent() {
     if (ready) {
       setShowPermissionsDialog(false)
       void warmupMicrophonePermission()
-      void warmupSystemAudioPermission()
     }
   }
 
