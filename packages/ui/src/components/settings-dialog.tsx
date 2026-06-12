@@ -185,7 +185,7 @@ export function SettingsDialog({
               >
                 <div className="font-medium text-foreground">Mixed (Default)</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Local Whisper transcription + Claude note generation
+                  Cloud transcription + Claude note generation
                 </div>
               </button>
               <button
@@ -199,7 +199,7 @@ export function SettingsDialog({
               >
                 <div className="font-medium text-foreground">Local-only</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Local Whisper + local Ollama note generation
+                  On-device transcription + local Ollama note generation
                 </div>
               </button>
             </div>

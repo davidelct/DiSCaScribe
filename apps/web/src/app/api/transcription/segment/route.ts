@@ -59,6 +59,16 @@ function isLikelySilentPcm16(buffer: ArrayBuffer): boolean {
 
 export async function POST(req: NextRequest) {
   try {
+    // Some providers (e.g. Deepgram) transcribe only the full recording in a
+    // single final pass, so live segment uploads are skipped entirely. Guard
+    // here defensively in case a client still posts a segment.
+    const resolved = resolveTranscriptionProvider()
+    if (!resolved.liveSegments) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "live_segments_disabled" }), {
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
     const formData = await req.formData()
     const sessionId = formData.get("session_id")
     const seqNo = Number(formData.get("seq_no"))

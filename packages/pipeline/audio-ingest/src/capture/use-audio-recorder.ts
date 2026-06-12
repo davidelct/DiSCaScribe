@@ -30,6 +30,13 @@ interface UseAudioRecorderOptions {
   segmentDurationMs?: number
   overlapMs?: number
   preferredInputDeviceId?: string
+  /**
+   * Emit incremental segments during recording for a live transcript preview.
+   * Disable for final-pass-only providers (e.g. Deepgram): the full recording is
+   * still accumulated and returned by stopRecording(); only segment chunking and
+   * the onSegmentReady callback are skipped. Defaults to true.
+   */
+  emitSegments?: boolean
 }
 
 interface UseAudioRecorderReturn {
@@ -45,7 +52,7 @@ interface UseAudioRecorderReturn {
 }
 
 export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudioRecorderReturn {
-  const { onSegmentReady, segmentDurationMs = DEFAULT_SEGMENT_MS, overlapMs = DEFAULT_OVERLAP_MS, preferredInputDeviceId } = options
+  const { onSegmentReady, segmentDurationMs = DEFAULT_SEGMENT_MS, overlapMs = DEFAULT_OVERLAP_MS, preferredInputDeviceId, emitSegments = true } = options
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -67,10 +74,15 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
   const segmentSamples = Math.round((segmentDurationMs / 1000) * TARGET_SAMPLE_RATE)
   const overlapSamples = Math.round((overlapMs / 1000) * TARGET_SAMPLE_RATE)
   const onSegmentRef = useRef(onSegmentReady)
+  const emitSegmentsRef = useRef(emitSegments)
 
   useEffect(() => {
     onSegmentRef.current = onSegmentReady
   }, [onSegmentReady])
+
+  useEffect(() => {
+    emitSegmentsRef.current = emitSegments
+  }, [emitSegments])
 
   const startTimer = useCallback(() => {
     timerRef.current = setInterval(() => {
@@ -135,9 +147,13 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
       if (!resampler) return
       const resampled = resampler.process(chunk)
       if (resampled.length === 0) return
+      // Always accumulate the full recording for the final pass.
       allSamplesRef.current.push(resampled)
-      bufferRef.current.push(resampled)
-      processSegments()
+      // Only chunk/emit live segments when enabled (skipped for final-pass-only providers).
+      if (emitSegmentsRef.current) {
+        bufferRef.current.push(resampled)
+        processSegments()
+      }
     },
     [processSegments],
   )
@@ -258,11 +274,13 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
 
   const finalizeRecording = useCallback(async (): Promise<Blob | null> => {
     try {
-      const remaining = bufferRef.current.drain()
-      const minSamples = Math.round((MIN_FINAL_SEGMENT_MS / 1000) * TARGET_SAMPLE_RATE)
-      const finalSegment = createFinalSegmentFromRemaining(remaining, minSamples, segmentSamples)
-      if (finalSegment) {
-        emitSegment(finalSegment)
+      if (emitSegmentsRef.current) {
+        const remaining = bufferRef.current.drain()
+        const minSamples = Math.round((MIN_FINAL_SEGMENT_MS / 1000) * TARGET_SAMPLE_RATE)
+        const finalSegment = createFinalSegmentFromRemaining(remaining, minSamples, segmentSamples)
+        if (finalSegment) {
+          emitSegment(finalSegment)
+        }
       }
 
       const allChunks = allSamplesRef.current

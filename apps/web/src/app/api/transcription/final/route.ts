@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
         Buffer.from(arrayBuffer),
         `${sessionId}-final.wav`,
         resolvedProvider,
+        { diarize: true },
       )
       const latencyMs = Date.now() - startedAtMs
       if (isBlankTranscript(transcript)) {

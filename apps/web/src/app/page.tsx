@@ -139,6 +139,10 @@ function HomePageContent() {
   const [transcriptionErrorMessage, setTranscriptionErrorMessage] = useState("")
   const [, setProcessingMetrics] = useState<ProcessingMetrics>({})
   const [sessionId, setSessionId] = useState<string | null>(null)
+  // Whether the active transcription provider streams live segments during
+  // recording. Final-pass-only providers (e.g. Deepgram) set this false so the
+  // recorder skips segment chunking/uploads. Defaults true (server confirms).
+  const [liveSegmentsEnabled, setLiveSegmentsEnabled] = useState(true)
   const [workflowError, setWorkflowError] = useState<PipelineError | null>(null)
 
   const currentEncounterIdRef = useRef<string | null>(null)
@@ -705,7 +709,31 @@ function HomePageContent() {
     segmentDurationMs: SEGMENT_DURATION_MS,
     overlapMs: OVERLAP_MS,
     preferredInputDeviceId,
+    emitSegments: liveSegmentsEnabled,
   })
+
+  // Ask the server which transcription provider is active and whether it streams
+  // live segments. Runs once on mount, well before any recording can start.
+  useEffect(() => {
+    let active = true
+    const baseUrl = apiBaseUrlRef.current
+    const url = baseUrl
+      ? `${baseUrl.replace(/\/+$/, "")}/api/settings/transcription-status`
+      : "/api/settings/transcription-status"
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data && typeof data.liveSegments === "boolean") {
+          setLiveSegmentsEnabled(data.liveSegments)
+        }
+      })
+      .catch(() => {
+        /* leave default (live segments enabled) */
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     if (recordingError) {

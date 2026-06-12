@@ -8,12 +8,13 @@ interface ModelIndicatorProps {
   processingMode: ProcessingMode
 }
 
-type TranscriptionProvider = "whisper_local" | "whisper_openai" | "medasr"
+type TranscriptionProvider = "whisper_local" | "whisper_openai" | "medasr" | "deepgram"
 
 const TRANSCRIPTION_LABELS: Record<TranscriptionProvider, { label: string; cloud: boolean }> = {
   whisper_openai: { label: "Whisper (Cloud)", cloud: true },
   whisper_local: { label: "Whisper (Local)", cloud: false },
   medasr: { label: "MedASR (Local)", cloud: false },
+  deepgram: { label: "Deepgram (Cloud)", cloud: true },
 }
 
 /**
