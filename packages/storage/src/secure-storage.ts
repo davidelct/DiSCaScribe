@@ -7,63 +7,15 @@ const PREFIX_BASE = "enc"
 const WEB_FALLBACK_KEY_STORAGE = "openscribe_encryption_key_web"
 
 let keyPromise: Promise<CryptoKey> | null = null
-let electronKeyPromise: Promise<string | null> | null = null
 
 /**
- * Get or generate the encryption key for this device.
+ * Get or generate the AES-GCM encryption key for this device.
  * Priority order:
- * 1. Electron safeStorage (HIPAA-compliant, OS keychain)
- * 2. localStorage (for migration from v1)
- * 3. Generate new key and store via safeStorage
+ * 1. NEXT_PUBLIC_SECURE_STORAGE_KEY env var (set by `pnpm run setup` / deployment)
+ * 2. A per-browser key generated and persisted in localStorage (dev fallback)
  */
 async function getOrGenerateDeviceKey(): Promise<string> {
-  // In Electron context, use safeStorage
-  if (typeof window !== "undefined" && window.desktop?.secureStorage) {
-    if (!electronKeyPromise) {
-      electronKeyPromise = (async () => {
-        const STORAGE_KEY = "openscribe_encryption_key"
-        
-        // Check if safeStorage is available
-        const isAvailable = await window.desktop!.secureStorage!.isAvailable()
-        if (!isAvailable) {
-          console.warn("Electron safeStorage not available, falling back to env key")
-          return null
-        }
-        
-        // Try to load existing key from localStorage (stored encrypted via safeStorage)
-        const stored = window.localStorage.getItem(STORAGE_KEY)
-        if (stored) {
-          try {
-            // Decrypt the key using Electron's safeStorage
-            const decrypted = await window.desktop!.secureStorage!.decrypt(stored)
-            return decrypted
-          } catch (error) {
-            console.error("Failed to decrypt stored key, generating new one", error)
-          }
-        }
-        
-        // Generate new key
-        const newKey = await window.desktop!.secureStorage!.generateKey()
-        
-        // Encrypt and store it
-        try {
-          const encrypted = await window.desktop!.secureStorage!.encrypt(newKey)
-          window.localStorage.setItem(STORAGE_KEY, encrypted)
-        } catch (error) {
-          console.error("Failed to store encrypted key", error)
-        }
-        
-        return newKey
-      })()
-    }
-    
-    const deviceKey = await electronKeyPromise
-    if (deviceKey) {
-      return deviceKey
-    }
-  }
-  
-  // Fallback to environment variable (legacy browser mode)
+  // Environment-provided key (primary path).
   if (KEY_ENV) {
     if (base64ToBytes(KEY_ENV).byteLength !== 32) {
       throw new Error("NEXT_PUBLIC_SECURE_STORAGE_KEY must be a base64 encoded 256-bit key.")
@@ -71,7 +23,7 @@ async function getOrGenerateDeviceKey(): Promise<string> {
     return KEY_ENV
   }
 
-  // Browser fallback for local-only/dev mode when env key is not configured.
+  // Browser fallback for dev mode when env key is not configured.
   if (typeof window !== "undefined") {
     const storedKey = window.localStorage.getItem(WEB_FALLBACK_KEY_STORAGE)
     if (storedKey && base64ToBytes(storedKey).byteLength === 32) {
@@ -84,7 +36,7 @@ async function getOrGenerateDeviceKey(): Promise<string> {
     return generatedKey
   }
 
-  throw new Error("NEXT_PUBLIC_SECURE_STORAGE_KEY must be configured in non-Electron environments.")
+  throw new Error("NEXT_PUBLIC_SECURE_STORAGE_KEY must be configured.")
 }
 
 function getCrypto(): Crypto {
@@ -215,65 +167,4 @@ export async function loadSecureItem<T>(key: string): Promise<T | null> {
     window.localStorage.removeItem(key)
     return null
   }
-}
-
-/**
- * Rotate encryption key by generating a new key and re-encrypting all data.
- * This is a manual operation for HIPAA compliance.
- * 
- * @returns Array of keys that were successfully rotated
- */
-export async function rotateEncryptionKey(): Promise<string[]> {
-  if (typeof window === "undefined") {
-    throw new Error("Key rotation is only available in browser environment")
-  }
-  
-  if (!window.desktop?.secureStorage) {
-    throw new Error("Key rotation requires Electron environment with safeStorage")
-  }
-  
-  // Get all localStorage keys
-  const allKeys: string[] = []
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i)
-    if (key) allKeys.push(key)
-  }
-  
-  // Load all encrypted data with old key
-  const dataMap = new Map<string, unknown>()
-  for (const key of allKeys) {
-    try {
-      const data = await loadSecureItem(key)
-      if (data !== null) {
-        dataMap.set(key, data)
-      }
-    } catch {
-      // Skip items that can't be decrypted
-      continue
-    }
-  }
-  
-  // Clear the old key cache
-  keyPromise = null
-  electronKeyPromise = null
-  
-  // Force generation of new key
-  const STORAGE_KEY = "openscribe_encryption_key"
-  window.localStorage.removeItem(STORAGE_KEY)
-  
-  // Generate and store new key
-  await getOrGenerateDeviceKey()
-  
-  // Re-encrypt all data with new key
-  const rotated: string[] = []
-  for (const [key, value] of dataMap.entries()) {
-    try {
-      await saveSecureItem(key, value)
-      rotated.push(key)
-    } catch (error) {
-      console.error(`Failed to re-encrypt ${key}:`, error)
-    }
-  }
-  
-  return rotated
 }

@@ -165,19 +165,3 @@ describe("Secure Storage - PHI Protection Tests", () => {
     expect(loaded).toBeNull()
   })
 })
-
-describe("Secure Storage - Key Rotation", () => {
-  it("should provide a key rotation function", async () => {
-    const secureStorage = await import("../secure-storage")
-    
-    expect(secureStorage.rotateEncryptionKey).toBeDefined()
-    expect(typeof secureStorage.rotateEncryptionKey).toBe("function")
-  })
-  
-  it("should fail key rotation in non-Electron environment", async () => {
-    const { rotateEncryptionKey } = await import("../secure-storage")
-    
-    // No desktop API available
-    await expect(rotateEncryptionKey()).rejects.toThrow("requires Electron environment")
-  })
-})
