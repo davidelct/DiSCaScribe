@@ -11,37 +11,29 @@ interface TranscriptTurn {
   text: string
 }
 
-// Distinct, theme-aware accents cycled per speaker index.
+// Theme-aware accents cycled per speaker index. Kept within the blue family
+// to match the clinical palette; ordered so the first two speakers (typically
+// clinician/patient) get the highest-contrast pair.
 const SPEAKER_STYLES = [
+  {
+    label: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
+    bubble: "bg-blue-50 border-blue-200/70 dark:bg-blue-500/10 dark:border-blue-500/20",
+  },
+  {
+    label: "text-indigo-600 dark:text-indigo-400",
+    dot: "bg-indigo-500",
+    bubble: "bg-indigo-50 border-indigo-200/70 dark:bg-indigo-500/10 dark:border-indigo-500/20",
+  },
   {
     label: "text-sky-600 dark:text-sky-400",
     dot: "bg-sky-500",
     bubble: "bg-sky-50 border-sky-200/70 dark:bg-sky-500/10 dark:border-sky-500/20",
   },
   {
-    label: "text-violet-600 dark:text-violet-400",
-    dot: "bg-violet-500",
-    bubble: "bg-violet-50 border-violet-200/70 dark:bg-violet-500/10 dark:border-violet-500/20",
-  },
-  {
-    label: "text-emerald-600 dark:text-emerald-400",
-    dot: "bg-emerald-500",
-    bubble: "bg-emerald-50 border-emerald-200/70 dark:bg-emerald-500/10 dark:border-emerald-500/20",
-  },
-  {
-    label: "text-amber-600 dark:text-amber-400",
-    dot: "bg-amber-500",
-    bubble: "bg-amber-50 border-amber-200/70 dark:bg-amber-500/10 dark:border-amber-500/20",
-  },
-  {
-    label: "text-rose-600 dark:text-rose-400",
-    dot: "bg-rose-500",
-    bubble: "bg-rose-50 border-rose-200/70 dark:bg-rose-500/10 dark:border-rose-500/20",
-  },
-  {
-    label: "text-teal-600 dark:text-teal-400",
-    dot: "bg-teal-500",
-    bubble: "bg-teal-50 border-teal-200/70 dark:bg-teal-500/10 dark:border-teal-500/20",
+    label: "text-cyan-600 dark:text-cyan-400",
+    dot: "bg-cyan-500",
+    bubble: "bg-cyan-50 border-cyan-200/70 dark:bg-cyan-500/10 dark:border-cyan-500/20",
   },
 ] as const
 
