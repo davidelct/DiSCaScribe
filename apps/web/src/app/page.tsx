@@ -11,7 +11,7 @@ import {
 import type { Encounter } from "@storage/types"
 import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, LocalSetupWizard, useHttpsWarning } from "@ui"
 import { NoteEditor } from "@note-rendering"
-import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, warmupSystemAudioPermission } from "@audio"
+import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, warmupSystemAudioPermission, compressAudioFileToMp3 } from "@audio"
 import { useSegmentUpload, type UploadError } from "@transcription";
 import { WorkflowErrorDisplay } from "./workflow-error-display"
 import { generateClinicalNote } from "@/app/actions"
@@ -1196,6 +1196,15 @@ function HomePageContent() {
         continue
       }
 
+      if (response.status === 413) {
+        const message =
+          "This recording is too long to upload on the hosted demo (request limit ~4.5 MB even after compression). Try a shorter file."
+        setTranscriptionErrorMessage(message)
+        setWorkflowError(createPipelineError("file_too_large", message, true))
+        setTranscriptionStatus("failed")
+        throw new Error(message)
+      }
+
       let serverError: unknown = null
       try {
         const body = (await response.json()) as { error?: unknown }
@@ -1259,7 +1268,21 @@ function HomePageContent() {
       currentEncounterIdRef.current = encounter.id
       setView({ type: "processing", encounterId: encounter.id })
 
-      await uploadAudioFile(session, file)
+      // Compress in the browser (16 kHz mono MP3) so the upload stays under the
+      // hosted serverless request-size limit. Fall back to the original on failure.
+      let uploadFile: File = file
+      try {
+        const compressed = await compressAudioFileToMp3(file)
+        uploadFile = new File([compressed.blob], compressed.filename, { type: "audio/mpeg" })
+        debugLog(
+          `[upload] compressed ${file.name}: ${(file.size / 1e6).toFixed(1)}MB -> ` +
+            `${(uploadFile.size / 1e6).toFixed(2)}MB @ ${compressed.bitrateKbps}kbps`,
+        )
+      } catch (compressionError) {
+        debugWarn("Audio compression failed; uploading original file", compressionError)
+      }
+
+      await uploadAudioFile(session, uploadFile)
     } catch (err) {
       debugError("Failed to upload recording:", err)
       setTranscriptionErrorMessage((previous) => previous || "Failed to transcribe the uploaded file.")
