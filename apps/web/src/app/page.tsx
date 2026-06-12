@@ -1162,6 +1162,111 @@ function HomePageContent() {
     }
   }, [])
 
+  const uploadAudioFile = useCallback(async (activeSessionId: string, file: File): Promise<void> => {
+    const baseUrl = apiBaseUrlRef.current
+    const url = baseUrl
+      ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
+      : "/api/transcription/upload"
+    const maxAttempts = 3
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let response: Response
+      try {
+        const formData = new FormData()
+        formData.append("session_id", activeSessionId)
+        formData.append("file", file, file.name || `${activeSessionId}-upload`)
+        response = await fetch(url, { method: "POST", body: formData })
+      } catch (networkError) {
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
+          continue
+        }
+        debugError("Failed to upload audio file:", networkError)
+        setTranscriptionErrorMessage((previous) => previous || "Transcription failed. Please retry.")
+        const workflowError = toFinalUploadWorkflowError(networkError)
+        if (workflowError) setWorkflowError(workflowError)
+        setTranscriptionStatus("failed")
+        throw networkError
+      }
+
+      if (response.ok) return
+
+      const retryable = response.status === 429 || response.status >= 500
+      if (retryable && attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
+        continue
+      }
+
+      let serverError: unknown = null
+      try {
+        const body = (await response.json()) as { error?: unknown }
+        serverError = body?.error
+      } catch {
+        // ignore JSON parse failures
+      }
+      const failure = createFinalUploadFailure(response.status, serverError)
+      const parsedError = failure.parsedError
+      if (parsedError) {
+        setWorkflowError(parsedError)
+        if (String(parsedError.code).toLowerCase() === "blank_audio") {
+          setLastFailureCode("TRANSCRIPTION_BLANK_AUDIO")
+          setTranscriptionErrorMessage("No detectable speech in the uploaded file. Check the audio and try again.")
+        } else {
+          setTranscriptionErrorMessage(parsedError.message)
+        }
+      } else {
+        setTranscriptionErrorMessage(failure.error.message || `Upload failed (${response.status})`)
+      }
+      setTranscriptionStatus("failed")
+      throw failure.error
+    }
+  }, [])
+
+  const handleUploadRecording = async (
+    data: { patient_name: string; patient_id: string; visit_reason: string },
+    file: File,
+  ) => {
+    try {
+      if (!hasAnthropicApiKey) {
+        setShowMixedKeyPrompt(true)
+        setShowSettingsDialog(true)
+        return
+      }
+      const readiness = await ensureMixedRuntimeReady(true)
+      if (!readiness.ok) {
+        return
+      }
+
+      cleanupSession()
+      finalTranscriptRef.current = ""
+      finalRecordingRef.current = null
+      setTranscriptionErrorMessage("")
+      setWorkflowError(null)
+      setTranscriptionStatus("in-progress")
+      setNoteGenerationStatus("pending")
+      setProcessingMetrics({ processingStartedAt: Date.now(), transcriptionStartedAt: Date.now() })
+
+      const session = crypto.randomUUID()
+      // Subscribes the SSE stream (via sessionId) before the upload POST begins,
+      // so the server-pushed `final` event is received.
+      startNewSession(session)
+
+      const encounter = await addEncounter({
+        ...data,
+        status: "processing",
+        transcript_text: "",
+        session_id: session,
+      })
+      currentEncounterIdRef.current = encounter.id
+      setView({ type: "processing", encounterId: encounter.id })
+
+      await uploadAudioFile(session, file)
+    } catch (err) {
+      debugError("Failed to upload recording:", err)
+      setTranscriptionErrorMessage((previous) => previous || "Failed to transcribe the uploaded file.")
+      setTranscriptionStatus("failed")
+    }
+  }
+
   const handleStopRecording = async () => {
     const encounter = currentEncounter
     if (!encounter) return
@@ -1519,7 +1624,11 @@ function HomePageContent() {
       case "new-form":
         return (
           <div className="flex h-full items-center justify-center p-8">
-            <NewEncounterForm onStart={handleStartRecording} onCancel={handleCancelNew} />
+            <NewEncounterForm
+              onStart={handleStartRecording}
+              onCancel={handleCancelNew}
+              onUpload={useLocalBackend ? undefined : handleUploadRecording}
+            />
           </div>
         )
       case "recording":

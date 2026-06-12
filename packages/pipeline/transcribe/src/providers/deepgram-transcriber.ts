@@ -24,6 +24,8 @@ export interface DeepgramTranscriberOptions {
   language?: string
   apiKey?: string
   baseUrl?: string
+  /** MIME type of the audio bytes (e.g. "audio/wav", "audio/mpeg"). Deepgram also auto-detects. */
+  contentType?: string
   timeoutMs?: number
   maxRetries?: number
   fetchFn?: typeof fetch
@@ -144,6 +146,7 @@ export async function transcribeWavBuffer(
   const model = options?.model || process.env.DEEPGRAM_MODEL || DEFAULT_DEEPGRAM_MODEL
   const language = options?.language || process.env.DEEPGRAM_LANGUAGE || DEFAULT_DEEPGRAM_LANGUAGE
   const diarize = options?.diarize ?? false
+  const contentType = options?.contentType || "audio/wav"
   const timeoutMs = options?.timeoutMs ?? resolvePositiveInteger(process.env.DEEPGRAM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)
   const maxRetries = options?.maxRetries ?? resolvePositiveInteger(process.env.DEEPGRAM_MAX_RETRIES, DEFAULT_MAX_RETRIES)
   const fetchFn = options?.fetchFn ?? globalThis.fetch.bind(globalThis)
@@ -181,7 +184,7 @@ export async function transcribeWavBuffer(
         method: "POST",
         headers: {
           Authorization: `Token ${apiKey}`,
-          "Content-Type": "audio/wav",
+          "Content-Type": contentType,
         },
         body: new Uint8Array(buffer),
       })

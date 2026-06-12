@@ -19,6 +19,8 @@ export interface ResolvedTranscriptionProvider {
 /** Per-request transcription options that providers may honor (Deepgram supports diarization). */
 export interface TranscriptionRequestOptions {
   diarize?: boolean
+  /** MIME type of the audio bytes, used for non-WAV uploads (e.g. mp3/m4a). */
+  contentType?: string
 }
 
 const DEFAULT_WHISPER_LOCAL_MODEL = "tiny.en"
@@ -72,7 +74,11 @@ export async function transcribeWithResolvedProvider(
 ): Promise<string> {
   switch (resolved.provider) {
     case "deepgram":
-      return transcribeWithDeepgram(buffer, filename, { model: resolved.model, diarize: options.diarize })
+      return transcribeWithDeepgram(buffer, filename, {
+        model: resolved.model,
+        diarize: options.diarize,
+        contentType: options.contentType,
+      })
     case "medasr":
       return transcribeWithMedASR(buffer, filename)
     case "whisper_openai":
