@@ -2,6 +2,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Tailwind v4 auto-detects sources relative to the nearest package.json
+   (apps/web), so classes used only in shared packages/* aren't scanned.
+   Explicitly include them so component styles there are generated. */
+@source "../../../../packages";
+
 @custom-variant dark (&:is(.dark *));
 
 /* ── Clinical Calm ──────────────────────────────────────────────
