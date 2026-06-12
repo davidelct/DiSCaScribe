@@ -64,10 +64,8 @@ export function validateMarkdownNote(markdown: string): {
 } {
   const sections = parseMarkdownNote(markdown);
   const requiredSections = [
-    'Chief Complaint',
-    'History of Present Illness',
-    'Review of Systems',
-    'Physical Exam',
+    'Subjective',
+    'Objective',
     'Assessment',
     'Plan'
   ];
@@ -86,18 +84,12 @@ export function validateMarkdownNote(markdown: string): {
  * Create an empty markdown note template
  */
 export function createEmptyMarkdownNote(): string {
-  return `# Clinical Note
+  return `# SOAP Note
 
-## Chief Complaint
-
-
-## History of Present Illness
+## Subjective
 
 
-## Review of Systems
-
-
-## Physical Exam
+## Objective
 
 
 ## Assessment
@@ -124,27 +116,22 @@ export function extractMarkdownFromResponse(response: string): string {
 }
 
 /**
- * Normalize section headings to standard format
- * Handles variations like "HPI" -> "History of Present Illness"
+ * Normalize SOAP section headings to standard format
+ * Handles abbreviations and casing variations (e.g. "S" -> "Subjective")
  */
 export function normalizeMarkdownSections(markdown: string): string {
   const sectionMappings: Record<string, string> = {
-    'CC': 'Chief Complaint',
-    'Chief complaint': 'Chief Complaint',
-    'CHIEF COMPLAINT': 'Chief Complaint',
-    'HPI': 'History of Present Illness',
-    'History of present illness': 'History of Present Illness',
-    'HISTORY OF PRESENT ILLNESS': 'History of Present Illness',
-    'ROS': 'Review of Systems',
-    'Review of systems': 'Review of Systems',
-    'REVIEW OF SYSTEMS': 'Review of Systems',
-    'PE': 'Physical Exam',
-    'Physical exam': 'Physical Exam',
-    'Physical Examination': 'Physical Exam',
-    'PHYSICAL EXAM': 'Physical Exam',
-    'Assessment': 'Assessment',
+    'S': 'Subjective',
+    'subjective': 'Subjective',
+    'SUBJECTIVE': 'Subjective',
+    'O': 'Objective',
+    'objective': 'Objective',
+    'OBJECTIVE': 'Objective',
+    'A': 'Assessment',
+    'assessment': 'Assessment',
     'ASSESSMENT': 'Assessment',
-    'Plan': 'Plan',
+    'P': 'Plan',
+    'plan': 'Plan',
     'PLAN': 'Plan',
   };
   

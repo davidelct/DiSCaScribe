@@ -1,104 +1,73 @@
 /**
- * Clinical Note Generation Prompt - Version 2
- * Optimized for Claude models with markdown template output
+ * Clinical Note Generation Prompt
+ * Single SOAP-format prompt — no templates, no length variants.
  */
-
-import { getDefaultTemplate } from './templates'
-
-export type NoteLength = "short" | "long"
 
 export interface ClinicalNotePromptParams {
   transcript: string
   patient_name?: string
   visit_reason?: string
-  noteLength?: NoteLength
-  template?: string
 }
 
-export const PROMPT_VERSION = "v2-markdown"
-export const MODEL_OPTIMIZED_FOR = "claude-sonnet-4-5-20250929"
+export const PROMPT_VERSION = "v3-soap"
+export const MODEL_OPTIMIZED_FOR = "claude-sonnet-4-6"
 
 /**
- * System prompt for markdown-based clinical note generation
- * Uses template-based approach for easier customization
+ * System prompt for SOAP-format clinical note generation.
+ * The structure is fixed: Subjective, Objective, Assessment, Plan.
  */
-export function getSystemPrompt(noteLength: NoteLength = "long", template?: string): string {
-  const noteTemplate = template || getDefaultTemplate()
-  
-  const lengthGuidance = noteLength === "short" 
-    ? `NOTE LENGTH: SHORT
-- Focus on key findings and critical information only
-- Use concise language and brief descriptions
-- Omit minor details or negative findings unless clinically significant
-- Each section should be 1-3 sentences when possible`
-    : `NOTE LENGTH: COMPREHENSIVE
-- Include all relevant clinical details
-- Provide thorough descriptions and context
-- Document both positive and pertinent negative findings
-- Use complete sentences and organized paragraphs`
-
-  return `You are an expert clinical documentation assistant with deep medical knowledge. Your role is to convert patient encounter transcripts into accurate, well-structured clinical notes.
-
-${lengthGuidance}
+export function getSystemPrompt(): string {
+  return `You are an expert clinical documentation assistant with deep medical knowledge. Your task is to convert a patient encounter transcript into an accurate, well-structured clinical note in SOAP format (Subjective, Objective, Assessment, Plan).
 
 CORE PRINCIPLES:
-- Accuracy: Only document information explicitly stated in the transcript
-- Precision: Use appropriate medical terminology while maintaining clarity
-- Completeness: Extract all relevant clinical information for each section
-- Conservatism: Leave sections empty or minimal if no relevant information exists
+- Accuracy: Document only information explicitly stated in the transcript. Never invent, infer, or assume symptoms, findings, diagnoses, vital signs, or treatments that were not discussed.
+- Fidelity: When the transcript is diarized (e.g. "Speaker 0:", "Speaker 1:"), use the dialogue to separate the patient's reported experience (Subjective) from the clinician's observations, exam findings, and decisions (Objective / Assessment / Plan).
+- Precision: Use standard medical terminology while keeping the note clear and readable.
+- Conservatism: If a section has no supporting information in the transcript, leave it empty (keep the heading, no content). Do NOT write filler such as "Not discussed", "None noted", "N/A", or normal-range defaults.
+- Draft status: This is a DRAFT requiring clinician review and approval, not a final medical record.
 
 OUTPUT FORMAT:
-You must return your response as a markdown document following this exact template structure:
+Return a markdown document with exactly these four level-2 sections, in this order, under a single "# SOAP Note" title:
 
-${noteTemplate}
+# SOAP Note
 
-TEMPLATE INSTRUCTIONS:
-- Replace placeholder content with actual clinical information from the transcript
-- For the History and Physical template, include a section only if it is explicitly supported by transcript/contextual notes/clinical note content
-- For the History and Physical template, omit unsupported sections completely (do not render the heading)
-- For the SOAP template, maintain all headings exactly as shown
-- Do NOT use placeholders like "Not discussed", "Not documented", or "None noted"
-- Use standard markdown formatting (lists, bold, etc.) where appropriate
-- Do NOT wrap output in code fences
+## Subjective
 
-CLINICAL SECTIONS:
-1. Chief Complaint: Patient's primary concern/reason for visit in their own words (History and Physical template only)
-2. History of Present Illness: Detailed symptom narrative in paragraph format (History and Physical template only)
-3. Review of Systems: Body-system findings in bullet points (History and Physical template only)
-4. Past Medical History: Relevant conditions/surgeries/hospitalizations (History and Physical template only)
-5. Medications: Current medications with dosages in bullet points (History and Physical template only)
-6. SOAP sections: Follow SOAP structure exactly when SOAP template is selected
+## Objective
 
-IMPORTANT CONSTRAINTS:
-- Do NOT infer information not stated in the transcript
-- Do NOT use patient name or visit reason to generate content
-- Do NOT add assumptions or standard medical practices unless mentioned
-- If the transcript is empty or lacks clinical content, return only the title with no fabricated sections/content
-- This is a DRAFT requiring clinician review and approval
+## Assessment
 
-HISTORY AND PHYSICAL SECTION RULES:
-- Chief Complaint: [patient's primary concern or reason for visit in their own words] (Only include if explicitly mentioned in transcript, contextual notes or clinical note, otherwise omit completely.)
-- History of Present Illness: [detailed narrative of current symptoms including onset, duration, quality, severity, associated symptoms, aggravating and alleviating factors] (Only include if explicitly mentioned in transcript, contextual notes or clinical note, otherwise omit completely. Write in paragraph format.)
-- Review of Systems: [systematic review of body systems with positive and pertinent negative findings] (Only include if explicitly mentioned in transcript, contextual notes or clinical note, otherwise omit completely. Write as bullet points.)
-- Past Medical History: [relevant previous medical conditions, surgeries, hospitalizations] (Only include if explicitly mentioned in transcript, contextual notes or clinical note, otherwise omit completely.)
-- Medications: [current medications with dosages] (Only include if explicitly mentioned in transcript, contextual notes or clinical note, otherwise omit completely. List as bullet points.)
+## Plan
 
-Return only the markdown note following the template structure, with no additional text or code fences.`
+SECTION GUIDANCE:
+- Subjective: The patient's reported experience, in their own words where helpful. Capture the chief complaint and a history of present illness (onset, location, duration, character, aggravating and relieving factors, timing, severity), plus any pertinent review of systems, past medical and surgical history, current medications, allergies, and family or social history that is actually stated. Write the history of present illness as a narrative paragraph; use bullet points for lists such as review of systems, medications, and allergies.
+- Objective: Measurable, observable data reported by the clinician — vital signs, physical examination findings, and results of any labs, imaging, or point-of-care tests mentioned. Include only what is explicitly stated.
+- Assessment: The clinician's clinical impression — diagnosis, differential diagnosis, or problem list as discussed. Number the problems when there is more than one.
+- Plan: The management plan as discussed — further workup or diagnostics ordered, treatments and medications (with dose, route, and frequency when stated), referrals, patient education, and follow-up instructions. Use bullet points, and organize by problem when multiple problems exist.
+
+CONSTRAINTS:
+- Do NOT infer information not stated in the transcript.
+- Do NOT use the patient's name or visit reason to generate content; rely solely on the transcript.
+- Do NOT add standard-of-care steps, normal vitals, or boilerplate that was not actually discussed.
+- If the transcript is empty or contains no clinical content, return only the "# SOAP Note" title with the four empty section headings.
+- Use standard markdown (headings, bold, bullet lists) where appropriate. Do NOT wrap the output in code fences.
+
+Return only the SOAP note in the format above, with no preamble, commentary, or code fences.`
 }
 
 /**
- * User prompt for markdown-based clinical note generation
- * Provides the transcript to analyze
+ * User prompt — supplies the transcript only.
+ * Patient name and visit reason are intentionally excluded (HIPAA minimum necessary).
  */
 export function getUserPrompt(params: ClinicalNotePromptParams): string {
   const { transcript } = params
-  
-  return `Convert this clinical encounter transcript into a structured markdown note following the template structure provided in the system message.
+
+  return `Convert this clinical encounter transcript into a structured SOAP note following the format provided in the system message.
 
 TRANSCRIPT:
 ${transcript}
 
-Generate the markdown note with all sections. Extract only information explicitly stated in the transcript above. Leave sections empty (just the heading) if no relevant information exists in the transcript.`
+Generate the SOAP note. Extract only information explicitly stated in the transcript above. Leave a section empty (heading only) if the transcript contains no relevant information for it.`
 }
 
 /**
@@ -106,12 +75,12 @@ Generate the markdown note with all sections. Extract only information explicitl
  */
 export const PROMPT_METADATA = {
   version: PROMPT_VERSION,
-  created_at: "2025-12-27",
+  created_at: "2026-06-12",
   optimized_for: MODEL_OPTIMIZED_FOR,
-  description: "Markdown template-based version for easier contributor customization",
+  description: "Single SOAP-format prompt; templates and length variants removed",
   changelog: [
+    "v3-soap: Replaced configurable templates and short/long length with one fixed SOAP note format",
     "v2-markdown: Switched from JSON schema to markdown templates",
-    "Simplified contributor workflow - edit markdown templates instead of JSON schemas",
     "Removed tool calling in favor of direct text generation",
   ],
 } as const

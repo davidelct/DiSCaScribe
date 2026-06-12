@@ -14,7 +14,6 @@ export async function generateClinicalNote(params: ClinicalNoteRequest): Promise
       event_type: "note.generation_started",
       success: true,
       metadata: {
-        template: params.template || "default",
         transcript_length: params.transcript?.length || 0,
       },
     })
@@ -26,7 +25,6 @@ export async function generateClinicalNote(params: ClinicalNoteRequest): Promise
       event_type: "note.generated",
       success: true,
       metadata: {
-        template: params.template || "default",
         note_length: result.length,
       },
     })
@@ -38,9 +36,6 @@ export async function generateClinicalNote(params: ClinicalNoteRequest): Promise
       event_type: "note.generation_failed",
       success: false,
       error_message: error instanceof Error ? error.message : String(error),
-      metadata: {
-        template: params.template || "default",
-      },
     })
 
     throw error

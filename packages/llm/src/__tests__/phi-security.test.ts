@@ -15,7 +15,6 @@ test("getUserPrompt does NOT include patient_name in the prompt text", () => {
     transcript: "Patient reports headache for 3 days.",
     patient_name: "John Doe",
     visit_reason: "Headache evaluation",
-    noteLength: "long",
   })
 
   // The prompt should NOT contain the patient name
@@ -30,7 +29,6 @@ test("getUserPrompt does NOT include visit_reason in the prompt text", () => {
     transcript: "Patient reports headache for 3 days.",
     patient_name: "Jane Smith",
     visit_reason: "Migraine assessment and treatment",
-    noteLength: "long",
   })
 
   // The prompt should NOT contain the visit reason
@@ -46,7 +44,6 @@ test("getUserPrompt ONLY includes transcript data", () => {
     transcript,
     patient_name: "Alice Johnson",
     visit_reason: "Respiratory symptoms",
-    noteLength: "short",
   })
 
   // The prompt should contain the transcript
@@ -67,7 +64,7 @@ test("getUserPrompt ONLY includes transcript data", () => {
 })
 
 test("getSystemPrompt does NOT include PHI parameters", () => {
-  const systemPrompt = prompts.clinicalNote.currentVersion.getSystemPrompt("long")
+  const systemPrompt = prompts.clinicalNote.currentVersion.getSystemPrompt()
 
   // System prompt should never contain PHI - it's just instructions
   // Verify it doesn't accidentally leak parameters
@@ -93,7 +90,6 @@ test("Prompt construction follows Minimum Necessary principle", () => {
     transcript: "Patient denies chest pain. Blood pressure 120/80.",
     patient_name: "Bob Williams",
     visit_reason: "Annual physical",
-    noteLength: "long" as const,
   }
 
   const userPrompt = prompts.clinicalNote.currentVersion.getUserPrompt(params)

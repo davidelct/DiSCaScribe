@@ -58,7 +58,7 @@ export async function runLLMRequest({ system, prompt, model, apiKey, jsonSchema 
     )
   }
 
-  const defaultModel = "claude-sonnet-4-5-20250929"
+  const defaultModel = "claude-sonnet-4-6"
   const resolvedModel = model ?? defaultModel
 
   const client = new Anthropic({

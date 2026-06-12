@@ -7,27 +7,21 @@ import {
 } from "./clinical-models/markdown-note"
 import { debugLog, debugLogPHI, debugError, debugWarn } from "../../../storage/src/index"
 
-export type NoteLength = "short" | "long"
-
 export interface ClinicalNoteRequest {
   transcript: string
   patient_name: string
   visit_reason: string
-  noteLength?: NoteLength
-  template?: string
   apiKey?: string
 }
 
 export async function createClinicalNoteText(params: ClinicalNoteRequest): Promise<string> {
-  const { transcript, patient_name, visit_reason, noteLength = "long", template, apiKey } = params
+  const { transcript, patient_name, visit_reason, apiKey } = params
 
   debugLog("=".repeat(80))
   debugLog("GENERATING CLINICAL NOTE (MARKDOWN)")
   debugLog("=".repeat(80))
   debugLogPHI(`Patient Name: ${patient_name || "Not provided"}`)
   debugLogPHI(`Visit Reason: ${visit_reason || "Not provided"}`)
-  debugLog(`Note Length: ${noteLength}`)
-  debugLog(`Template: ${template || "default"}`)
   debugLog(`Transcript length: ${transcript.length} characters`)
 
   if (!transcript || transcript.trim().length === 0) {
@@ -47,14 +41,12 @@ export async function createClinicalNoteText(params: ClinicalNoteRequest): Promi
   debugLogPHI(transcript)
   debugLog("-".repeat(80))
 
-  // Use versioned prompts with markdown template
-  const systemPrompt = prompts.clinicalNote.currentVersion.getSystemPrompt(noteLength, template)
+  // Use versioned SOAP prompt
+  const systemPrompt = prompts.clinicalNote.currentVersion.getSystemPrompt()
   const userPrompt = prompts.clinicalNote.currentVersion.getUserPrompt({
     transcript,
     patient_name,
     visit_reason,
-    noteLength,
-    template,
   })
 
   try {
@@ -90,9 +82,6 @@ export async function createClinicalNoteText(params: ClinicalNoteRequest): Promi
       code: "note_generation_error",
       message: "Failed to generate clinical note",
       recoverable: true,
-      details: {
-        template: template || "default",
-      },
     })
   }
 }

@@ -42,8 +42,8 @@ test("createClinicalNoteText returns valid markdown structure", async () => {
   // Should be valid markdown with sections
   const sections = parseMarkdownNote(result)
 
-  // Should have all required sections
-  const requiredSections = ["Chief Complaint", "History of Present Illness", "Review of Systems", "Physical Exam", "Assessment", "Plan"]
+  // Should have all required SOAP sections
+  const requiredSections = ["Subjective", "Objective", "Assessment", "Plan"]
   for (const section of requiredSections) {
     assert.ok(section in sections, `Should have ${section} section`)
   }
@@ -66,18 +66,15 @@ test("createClinicalNoteText generates appropriate content from transcript", asy
 
   const sections = parseMarkdownNote(result)
 
-  // Chief complaint should mention foot/pain
-  const ccLower = sections["Chief Complaint"]?.toLowerCase() || ""
+  // Subjective should capture the foot pain and its timeline
+  const subjectiveLower = sections["Subjective"]?.toLowerCase() || ""
   assert.ok(
-    ccLower.includes("foot") || ccLower.includes("pain"),
-    "Chief complaint should reference foot pain"
+    subjectiveLower.includes("foot") || subjectiveLower.includes("pain"),
+    "Subjective should reference foot pain"
   )
-
-  // HPI should have some content about the timeline
-  const hpiLower = sections["History of Present Illness"]?.toLowerCase() || ""
   assert.ok(
-    hpiLower.includes("week") || hpiLower.includes("swollen") || hpiLower.includes("walk"),
-    "HPI should include details from transcript"
+    subjectiveLower.includes("week") || subjectiveLower.includes("swollen") || subjectiveLower.includes("walk"),
+    "Subjective should include details from transcript"
   )
 })
 
@@ -98,11 +95,11 @@ test("createClinicalNoteText does not invent information", async () => {
 
   const sections = parseMarkdownNote(result)
 
-  // Physical exam should be empty or minimal (not mentioned in transcript)
-  const peContent = sections["Physical Exam"]?.trim() || ""
+  // Objective should be empty or minimal (no exam/vitals mentioned in transcript)
+  const objectiveContent = sections["Objective"]?.trim() || ""
   assert.ok(
-    peContent.length < 50,
-    "Physical exam should be empty or minimal when not mentioned in transcript"
+    objectiveContent.length < 50,
+    "Objective should be empty or minimal when not mentioned in transcript"
   )
 
   // Assessment should be empty or minimal (no diagnosis mentioned)
@@ -133,32 +130,6 @@ Started yesterday`
 
   assert.equal(sections["Chief Complaint"], "Headache")
   assert.equal(sections["History of Present Illness"], "Started yesterday")
-})
-
-test("createClinicalNoteText handles short note length", async () => {
-  // Skip if no API key
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.log("⚠️  Skipping live API test - ANTHROPIC_API_KEY not set")
-    return
-  }
-
-  const transcript = "Patient reports foot pain for the last week. Pain is worse when walking. Swelling noted."
-
-  const result = await createClinicalNoteText({
-    transcript,
-    patient_name: "Test Patient",
-    visit_reason: "history_physical",
-    noteLength: "short",
-  })
-
-  // Should be valid markdown
-  const sections = parseMarkdownNote(result)
-  assert.ok("Chief Complaint" in sections, "Should have Chief Complaint section")
-  
-  // Short notes should be more concise than long notes
-  // This is a qualitative check - the LLM should follow length guidance
-  console.log("Short note length:", result.length)
-  assert.ok(result.length > 0, "Should generate some content")
 })
 
 test("createClinicalNoteText handles API errors gracefully", async () => {
