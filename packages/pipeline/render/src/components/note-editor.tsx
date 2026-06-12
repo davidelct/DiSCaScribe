@@ -9,6 +9,7 @@ import { Save, Copy, Download, Check, Pencil } from "lucide-react"
 import { format } from "date-fns"
 import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
+import { TranscriptView } from "./transcript-view"
 
 const VISIT_TYPE_LABELS: Record<string, string> = {
   history_physical: "History & Physical",
@@ -201,15 +202,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
             )
           ) : (
             <div className="min-h-[640px] rounded-2xl border border-border bg-card p-7 shadow-soft">
-              {encounter.transcript_text ? (
-                <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
-                  {encounter.transcript_text}
-                </pre>
-              ) : (
-                <div className="flex h-full items-center justify-center text-center">
-                  <p className="text-sm text-muted-foreground">No transcript available</p>
-                </div>
-              )}
+              <TranscriptView text={encounter.transcript_text} />
             </div>
           )}
         </div>
