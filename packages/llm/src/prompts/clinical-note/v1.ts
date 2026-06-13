@@ -49,10 +49,11 @@ CONSTRAINTS:
 - Do NOT infer information not stated in the transcript.
 - Do NOT use the patient's name or visit reason to generate content; rely solely on the transcript.
 - Do NOT add standard-of-care steps, normal vitals, or boilerplate that was not actually discussed.
+- Do NOT append any footer, disclaimer, sign-off, or statement about draft status or clinician review. The note must end with the Plan section's content. (The draft-review caveat is shown by the application, not written into the note.)
 - If the transcript is empty or contains no clinical content, return only the "# SOAP Note" title with the four empty section headings.
 - Use standard markdown (headings, bold, bullet lists) where appropriate. Do NOT wrap the output in code fences.
 
-Return only the SOAP note in the format above, with no preamble, commentary, or code fences.`
+Return only the SOAP note in the format above. Do not add any preamble, commentary, footer, disclaimer, or code fences. End the response immediately after the Plan section.`
 }
 
 /**
@@ -79,6 +80,7 @@ export const PROMPT_METADATA = {
   optimized_for: MODEL_OPTIMIZED_FOR,
   description: "Single SOAP-format prompt; templates and length variants removed",
   changelog: [
+    "v3-soap: Suppress trailing draft/disclaimer footer — note ends after the Plan section",
     "v3-soap: Replaced configurable templates and short/long length with one fixed SOAP note format",
     "v2-markdown: Switched from JSON schema to markdown templates",
     "Removed tool calling in favor of direct text generation",
