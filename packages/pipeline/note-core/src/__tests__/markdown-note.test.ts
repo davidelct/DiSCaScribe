@@ -85,18 +85,12 @@ Test
 })
 
 test("validateMarkdownNote checks for required sections", () => {
-  const completeNote = `# Clinical Note
+  const completeNote = `# SOAP Note
 
-## Chief Complaint
+## Subjective
 Test
 
-## History of Present Illness
-Test
-
-## Review of Systems
-Test
-
-## Physical Exam
+## Objective
 Test
 
 ## Assessment
@@ -112,9 +106,9 @@ Test`
 })
 
 test("validateMarkdownNote detects missing sections", () => {
-  const incompleteNote = `# Clinical Note
+  const incompleteNote = `# SOAP Note
 
-## Chief Complaint
+## Subjective
 Test
 
 ## Plan
@@ -123,9 +117,7 @@ Test`
   const validation = validateMarkdownNote(incompleteNote)
 
   assert.equal(validation.valid, false)
-  assert.ok(validation.missingSections.includes("History of Present Illness"))
-  assert.ok(validation.missingSections.includes("Review of Systems"))
-  assert.ok(validation.missingSections.includes("Physical Exam"))
+  assert.ok(validation.missingSections.includes("Objective"))
   assert.ok(validation.missingSections.includes("Assessment"))
 })
 
@@ -133,10 +125,8 @@ test("createEmptyMarkdownNote returns template with all sections", () => {
   const emptyNote = createEmptyMarkdownNote()
   const sections = parseMarkdownNote(emptyNote)
 
-  assert.ok("Chief Complaint" in sections)
-  assert.ok("History of Present Illness" in sections)
-  assert.ok("Review of Systems" in sections)
-  assert.ok("Physical Exam" in sections)
+  assert.ok("Subjective" in sections)
+  assert.ok("Objective" in sections)
   assert.ok("Assessment" in sections)
   assert.ok("Plan" in sections)
 })
@@ -163,41 +153,41 @@ test("extractMarkdownFromResponse handles md code fence type", () => {
 })
 
 test("normalizeMarkdownSections converts abbreviations", () => {
-  const markdown = `## CC
+  const markdown = `## S
 Test
 
-## HPI
+## O
 Test
 
-## ROS
+## A
 Test
 
-## PE
+## P
 Test`
 
   const normalized = normalizeMarkdownSections(markdown)
 
-  assert.ok(normalized.includes("## Chief Complaint"))
-  assert.ok(normalized.includes("## History of Present Illness"))
-  assert.ok(normalized.includes("## Review of Systems"))
-  assert.ok(normalized.includes("## Physical Exam"))
+  assert.ok(normalized.includes("## Subjective"))
+  assert.ok(normalized.includes("## Objective"))
+  assert.ok(normalized.includes("## Assessment"))
+  assert.ok(normalized.includes("## Plan"))
 })
 
 test("normalizeMarkdownSections handles various capitalizations", () => {
-  const markdown = `## CHIEF COMPLAINT
+  const markdown = `## SUBJECTIVE
 Test
 
-## History of present illness
+## objective
 Test
 
-## Physical Examination
+## PLAN
 Test`
 
   const normalized = normalizeMarkdownSections(markdown)
 
-  assert.ok(normalized.includes("## Chief Complaint"))
-  assert.ok(normalized.includes("## History of Present Illness"))
-  assert.ok(normalized.includes("## Physical Exam"))
+  assert.ok(normalized.includes("## Subjective"))
+  assert.ok(normalized.includes("## Objective"))
+  assert.ok(normalized.includes("## Plan"))
 })
 
 test("parseMarkdownNote handles subsections", () => {
