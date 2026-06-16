@@ -137,11 +137,19 @@ function extractTranscript(result: DeepgramResponse, diarize: boolean): string {
   return result.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? ""
 }
 
-export async function transcribeWavBuffer(
+/** The raw, parsed Deepgram response plus whether diarization was requested. */
+export interface DeepgramDetailedResult {
+  /** Transcript text (diarized with `Speaker N:` labels when diarize is on). */
+  text: string
+  /** The full parsed Deepgram JSON response (utterances, words, confidence, …). */
+  raw: DeepgramResponse
+}
+
+async function requestDeepgram(
   buffer: Buffer,
   filename: string,
   options?: DeepgramTranscriberOptions,
-): Promise<string> {
+): Promise<{ result: DeepgramResponse; diarize: boolean }> {
   const baseUrl = options?.baseUrl || process.env.DEEPGRAM_URL || DEFAULT_DEEPGRAM_URL
   const model = options?.model || process.env.DEEPGRAM_MODEL || DEFAULT_DEEPGRAM_MODEL
   const language = options?.language || process.env.DEEPGRAM_LANGUAGE || DEFAULT_DEEPGRAM_LANGUAGE
@@ -215,7 +223,7 @@ export async function transcribeWavBuffer(
       }
 
       const result = (await response.json()) as DeepgramResponse
-      return extractTranscript(result, diarize)
+      return { result, diarize }
     } catch (error) {
       const isAbort = error instanceof DOMException && error.name === "AbortError"
       const isNetworkFetch = error instanceof TypeError && error.message.toLowerCase().includes("fetch")
@@ -255,4 +263,28 @@ export async function transcribeWavBuffer(
   throw new PipelineStageError("api_error", "Deepgram transcription failed after retries", true, {
     provider: "deepgram",
   })
+}
+
+/** Transcribe a WAV buffer with Deepgram, returning the transcript text only. */
+export async function transcribeWavBuffer(
+  buffer: Buffer,
+  filename: string,
+  options?: DeepgramTranscriberOptions,
+): Promise<string> {
+  const { result, diarize } = await requestDeepgram(buffer, filename, options)
+  return extractTranscript(result, diarize)
+}
+
+/**
+ * Transcribe a WAV buffer with Deepgram, returning both the transcript text and
+ * the full raw JSON response. Used when the raw output (word-level timings,
+ * confidence, speaker turns) needs to be preserved alongside the rendered text.
+ */
+export async function transcribeWavBufferDetailed(
+  buffer: Buffer,
+  filename: string,
+  options?: DeepgramTranscriberOptions,
+): Promise<DeepgramDetailedResult> {
+  const { result, diarize } = await requestDeepgram(buffer, filename, options)
+  return { text: extractTranscript(result, diarize), raw: result }
 }

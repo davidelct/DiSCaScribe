@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server"
 import { toPipelineError } from "@pipeline-errors"
-import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProvider } from "@transcription"
+import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
+import { isBoxArchivingEnabled } from "@/lib/box/config"
 
 export const runtime = "nodejs"
 
@@ -98,12 +99,13 @@ export async function POST(req: NextRequest) {
     try {
       const resolvedProvider = resolveTranscriptionProvider()
       const startedAtMs = Date.now()
-      const transcript = await transcribeWithResolvedProvider(
+      const detail = await transcribeWithResolvedProviderDetailed(
         Buffer.from(arrayBuffer),
         `${sessionId}-final.wav`,
         resolvedProvider,
         { diarize: true },
       )
+      const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
       if (isBlankTranscript(transcript)) {
         transcriptionSessionStore.emitError(
@@ -124,6 +126,20 @@ export async function POST(req: NextRequest) {
         })
       }
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
+
+      // Stash the audio + raw transcript so a completed consultation can be
+      // archived to Box without the client re-uploading the recording. Gated on
+      // Box being enabled so we don't hold audio in memory when it's off.
+      if (isBoxArchivingEnabled()) {
+        transcriptionSessionStore.setArchiveArtifacts(sessionId, {
+          rawTranscript: detail.raw,
+          audio: {
+            buffer: Buffer.from(arrayBuffer),
+            contentType: "audio/wav",
+            filename: `${sessionId}.wav`,
+          },
+        })
+      }
 
       // Audit log: final transcription completed
       await writeAuditEntry({

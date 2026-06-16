@@ -1,4 +1,7 @@
-import { transcribeWavBuffer as transcribeWithDeepgram } from "./deepgram-transcriber"
+import {
+  transcribeWavBuffer as transcribeWithDeepgram,
+  transcribeWavBufferDetailed as transcribeWithDeepgramDetailed,
+} from "./deepgram-transcriber"
 import { transcribeWavBuffer as transcribeWithMedASR } from "./medasr-transcriber"
 import { transcribeWavBuffer as transcribeWithWhisperLocal } from "./whisper-local-transcriber"
 import { transcribeWavBuffer as transcribeWithWhisperOpenAI } from "./whisper-transcriber"
@@ -87,4 +90,34 @@ export async function transcribeWithResolvedProvider(
     default:
       return transcribeWithWhisperLocal(buffer, filename)
   }
+}
+
+/** Transcript text plus the provider's raw response (null for providers that don't expose one). */
+export interface DetailedTranscription {
+  text: string
+  /** Full provider response when available (Deepgram); null otherwise. */
+  raw: unknown
+}
+
+/**
+ * Like {@link transcribeWithResolvedProvider}, but also returns the provider's
+ * raw response when it has one. Only Deepgram currently surfaces structured raw
+ * output (word timings, confidence, speaker turns); other providers return
+ * `raw: null` and the same text the string API would produce.
+ */
+export async function transcribeWithResolvedProviderDetailed(
+  buffer: Buffer,
+  filename: string,
+  resolved: ResolvedTranscriptionProvider = resolveTranscriptionProvider(),
+  options: TranscriptionRequestOptions = {},
+): Promise<DetailedTranscription> {
+  if (resolved.provider === "deepgram") {
+    return transcribeWithDeepgramDetailed(buffer, filename, {
+      model: resolved.model,
+      diarize: options.diarize,
+      contentType: options.contentType,
+    })
+  }
+  const text = await transcribeWithResolvedProvider(buffer, filename, resolved, options)
+  return { text, raw: null }
 }

@@ -69,6 +69,47 @@ function resolveApiBaseUrl(): string {
   return "http://localhost:3001"
 }
 
+interface BoxArchivePayload {
+  session_id: string
+  encounter: {
+    id: string
+    patient_name: string
+    patient_id: string
+    visit_reason: string
+    language: string
+    created_at: string
+    recording_duration?: number
+  }
+  note: string
+  transcript: string
+}
+
+interface BoxArchiveResponse {
+  ok?: boolean
+  skipped?: boolean
+  folderId?: string
+  folderUrl?: string
+}
+
+/**
+ * Ask the server to archive a completed consultation to Box. The audio and raw
+ * transcript live in the server-side session store (stashed during
+ * transcription), so this request carries only the note and lightweight
+ * encounter metadata. Throws on a non-OK response; callers handle it best-effort.
+ */
+async function requestBoxArchive(baseUrl: string, payload: BoxArchivePayload): Promise<BoxArchiveResponse> {
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/box/upload` : "/api/box/upload"
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(`Box archive failed (${res.status})`)
+  }
+  return (await res.json()) as BoxArchiveResponse
+}
+
 function HomePageContent() {
   const { encounters, addEncounter, updateEncounter, deleteEncounter: removeEncounter, refresh } = useEncounters()
 
@@ -405,6 +446,44 @@ function HomePageContent() {
         debugLog("ENCOUNTER PROCESSING COMPLETE")
         debugLog("=".repeat(80) + "\n")
         setView({ type: "viewing", encounterId })
+
+        // Best-effort: archive the completed consultation (audio + transcript +
+        // raw transcript + note + metadata) to Box. Runs detached so it never
+        // blocks the UI, and a Box outage or missing config never fails the
+        // encounter — it only updates box_status.
+        void (async () => {
+          const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
+          if (!enc?.session_id) return
+          try {
+            const data = await requestBoxArchive(apiBaseUrlRef.current, {
+              session_id: enc.session_id,
+              encounter: {
+                id: enc.id,
+                patient_name: enc.patient_name,
+                patient_id: enc.patient_id,
+                visit_reason: enc.visit_reason,
+                language: enc.language,
+                created_at: enc.created_at,
+                recording_duration: enc.recording_duration,
+              },
+              note,
+              transcript,
+            })
+            if (data.skipped) {
+              await updateEncounterRef.current(encounterId, { box_status: "skipped" })
+            } else {
+              await updateEncounterRef.current(encounterId, {
+                box_status: "archived",
+                box_folder_id: data.folderId,
+                box_archived_at: new Date().toISOString(),
+              })
+              debugLog(`✅ Consultation archived to Box (folder ${data.folderId})`)
+            }
+          } catch (archiveError) {
+            debugError("Box archive failed", archiveError)
+            await updateEncounterRef.current(encounterId, { box_status: "failed" })
+          }
+        })()
       } catch (err) {
         debugError("❌ Note generation failed:", err)
         setWorkflowError(

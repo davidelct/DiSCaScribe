@@ -23,6 +23,10 @@ yarn-debug.log*
 yarn-error.log*
 *.tsbuildinfo
 .idea
+# Local scratch / cost-estimation tooling (not part of the app)
+cost-estimate-output/
+scripts/box-upload-test.mjs
+scripts/estimate-costs.mjs
 local-only/openscribe-backend/ollama_startup_report.json
 local-only/openscribe-backend/recorder_state.json
 local-only/openscribe-backend/config.json

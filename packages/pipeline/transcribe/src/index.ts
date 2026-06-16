@@ -7,10 +7,16 @@ export type { PendingSegment, UploadError } from "./hooks/use-segment-upload"
 export { transcribeWavBuffer as transcribeWithWhisper } from "./providers/whisper-transcriber"
 export { transcribeWavBuffer as transcribeWithWhisperLocal } from "./providers/whisper-local-transcriber"
 export { transcribeWavBuffer as transcribeWithMedASR } from "./providers/medasr-transcriber"
-export { transcribeWavBuffer as transcribeWithDeepgram } from "./providers/deepgram-transcriber"
+export {
+  transcribeWavBuffer as transcribeWithDeepgram,
+  transcribeWavBufferDetailed as transcribeWithDeepgramDetailed,
+  type DeepgramDetailedResult,
+} from "./providers/deepgram-transcriber"
 export {
   resolveTranscriptionProvider,
   transcribeWithResolvedProvider,
+  transcribeWithResolvedProviderDetailed,
+  type DetailedTranscription,
   type ResolvedTranscriptionProvider,
   type TranscriptionProvider,
   type TranscriptionRequestOptions,

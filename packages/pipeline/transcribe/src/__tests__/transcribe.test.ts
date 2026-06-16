@@ -7,6 +7,7 @@ import {
   type UploadError,
 } from "../hooks/segment-upload-controller.js"
 import { transcribeWavBuffer } from "../providers/whisper-transcriber.js"
+import { transcribeWavBufferDetailed } from "../providers/deepgram-transcriber.js"
 
 function createTestWavBuffer({
   sampleRate,
@@ -210,6 +211,35 @@ test("transcribeWavBuffer validates API keys and forwards payloads", async () =>
     assert(seen.form instanceof FormData)
   } finally {
     process.env.OPENAI_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("transcribeWavBufferDetailed returns diarized text and the raw response", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  const deepgramResponse = {
+    results: {
+      channels: [{ alternatives: [{ transcript: "Hello there. Hi doctor." }] }],
+      utterances: [
+        { speaker: 0, transcript: "Hello there." },
+        { speaker: 1, transcript: "Hi doctor." },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    // Diarized text groups utterances by speaker.
+    assert.equal(result.text, "Speaker 0: Hello there.\nSpeaker 1: Hi doctor.")
+    // The full raw JSON is preserved for downstream archival/research.
+    assert.deepEqual(result.raw, deepgramResponse)
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
     globalThis.fetch = originalFetch
   }
 })
