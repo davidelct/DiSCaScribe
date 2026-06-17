@@ -16,31 +16,12 @@ export interface TranscriptionEvent {
   data: Record<string, unknown>
 }
 
-/** Captured audio kept transiently so a completed session can be archived. */
-export interface ArchiveAudio {
-  buffer: Buffer
-  contentType: string
-  filename: string
-}
-
-/**
- * Heavy artifacts (the audio bytes, the provider's raw JSON) stashed on a
- * session so a follow-up request can archive the consultation without the
- * client re-uploading the audio. Populated only when archiving is enabled, and
- * cleared once the archive completes.
- */
-export interface ArchiveArtifacts {
-  audio?: ArchiveAudio
-  rawTranscript?: unknown
-}
-
 interface SessionRecord {
   id: string
   segments: Map<number, SegmentMetadata>
   stitchedText: string
   status: TranscriptionStatus
   finalTranscript?: string
-  archive?: ArchiveArtifacts
   listeners: Set<(event: TranscriptionEvent) => void>
 }
 
@@ -221,27 +202,6 @@ class TranscriptionSessionStore {
         final_transcript: transcript,
       },
     })
-  }
-
-  /**
-   * Stash heavy artifacts (audio bytes and/or raw transcript JSON) for a later
-   * archive step. Merges with anything already stashed for the session.
-   */
-  setArchiveArtifacts(sessionId: string, artifacts: ArchiveArtifacts) {
-    const session = this.getSession(sessionId)
-    session.archive = { ...session.archive, ...artifacts }
-    this.sessionTimestamps.set(sessionId, Date.now())
-  }
-
-  /** Read the stashed archive artifacts without creating a session. */
-  getArchiveArtifacts(sessionId: string): ArchiveArtifacts | undefined {
-    return this.sessions.get(sessionId)?.archive
-  }
-
-  /** Drop the stashed artifacts (and free the audio buffer) once archived. */
-  clearArchiveArtifacts(sessionId: string) {
-    const session = this.sessions.get(sessionId)
-    if (session) session.archive = undefined
   }
 
   emitError(sessionId: string, error: PipelineError | Error | unknown) {

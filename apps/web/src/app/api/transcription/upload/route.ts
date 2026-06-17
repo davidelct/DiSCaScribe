@@ -3,7 +3,7 @@ import { toPipelineError } from "@pipeline-errors"
 import { resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
-import { isBoxArchivingEnabled } from "@/lib/box/config"
+import { archiveTranscriptionArtifacts, getBoxConfig } from "@/lib/box"
 
 export const runtime = "nodejs"
 
@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData()
     const sessionId = formData.get("session_id")
     const file = formData.get("file")
+    // Optional, only sent when Box archival is on — used to file phase-1
+    // artifacts under the same per-consult folder as the later note upload.
+    const encounterId = typeof formData.get("encounter_id") === "string" ? String(formData.get("encounter_id")) : ""
+    const createdAt = typeof formData.get("created_at") === "string" ? String(formData.get("created_at")) : ""
 
     if (typeof sessionId !== "string" || !(file instanceof Blob)) {
       return jsonError(400, "validation_error", "Missing session_id or file", false)
@@ -79,16 +83,29 @@ export async function POST(req: NextRequest) {
 
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
 
-      // Stash the uploaded audio + raw transcript for Box archival when enabled.
-      if (isBoxArchivingEnabled()) {
-        transcriptionSessionStore.setArchiveArtifacts(sessionId, {
-          rawTranscript: detail.raw,
-          audio: {
-            buffer: Buffer.from(arrayBuffer),
-            contentType: contentType || "application/octet-stream",
-            filename,
-          },
-        })
+      // Phase 1 of Box archival: upload the uploaded audio + raw Deepgram JSON +
+      // transcript from this request (which holds the bytes), so archival stays
+      // correct on serverless. Best-effort — never fails the transcription.
+      if (encounterId) {
+        const boxConfig = getBoxConfig()
+        if (boxConfig.enabled) {
+          try {
+            await archiveTranscriptionArtifacts({
+              config: boxConfig.config,
+              encounterId,
+              createdAt,
+              transcriptText: transcript,
+              rawTranscript: detail.raw,
+              audio: {
+                buffer: Buffer.from(arrayBuffer),
+                contentType: contentType || "application/octet-stream",
+                filename,
+              },
+            })
+          } catch (boxError) {
+            console.error("[box] phase-1 archive failed (upload)", boxError)
+          }
+        }
       }
 
       await writeAuditEntry({

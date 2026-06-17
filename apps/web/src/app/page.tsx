@@ -92,10 +92,11 @@ interface BoxArchiveResponse {
 }
 
 /**
- * Ask the server to archive a completed consultation to Box. The audio and raw
- * transcript live in the server-side session store (stashed during
- * transcription), so this request carries only the note and lightweight
- * encounter metadata. Throws on a non-OK response; callers handle it best-effort.
+ * Ask the server to finish archiving a completed consultation to Box (phase 2:
+ * note + metadata manifest). The heavy artifacts (audio + raw transcript) were
+ * already uploaded by the transcription request, so this carries only the note
+ * and lightweight encounter metadata. Throws on a non-OK response; callers
+ * handle it best-effort.
  */
 async function requestBoxArchive(baseUrl: string, payload: BoxArchivePayload): Promise<BoxArchiveResponse> {
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/box/upload` : "/api/box/upload"
@@ -712,11 +713,22 @@ function HomePageContent() {
     }
   }
 
-  const uploadFinalRecording = useCallback(async (activeSessionId: string, blob: Blob, attempt = 1): Promise<void> => {
+  const uploadFinalRecording = useCallback(
+    async (
+      activeSessionId: string,
+      blob: Blob,
+      encounterId: string,
+      createdAt: string,
+      attempt = 1,
+    ): Promise<void> => {
     try {
       const formData = new FormData()
       formData.append("session_id", activeSessionId)
       formData.append("file", blob, `${activeSessionId}-full.wav`)
+      // Sent so the server can file the Box phase-1 artifacts (audio + raw
+      // transcript) under the same per-consult folder the note upload uses.
+      if (encounterId) formData.append("encounter_id", encounterId)
+      if (createdAt) formData.append("created_at", createdAt)
       const baseUrl = apiBaseUrlRef.current
       const url = baseUrl
         ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/final`
@@ -729,7 +741,7 @@ function HomePageContent() {
         const retryable = response.status === 429 || response.status >= 500
         if (retryable && attempt < 3) {
           await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
-          return uploadFinalRecording(activeSessionId, blob, attempt + 1)
+          return uploadFinalRecording(activeSessionId, blob, encounterId, createdAt, attempt + 1)
         }
         let serverError: unknown = null
         try {
@@ -761,7 +773,7 @@ function HomePageContent() {
     } catch (error) {
       if (attempt < 3) {
         await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
-        return uploadFinalRecording(activeSessionId, blob, attempt + 1)
+        return uploadFinalRecording(activeSessionId, blob, encounterId, createdAt, attempt + 1)
       }
       debugError("Failed to upload final recording:", error)
       setTranscriptionErrorMessage((previous) => previous || "Transcription failed. Please retry.")
@@ -774,7 +786,8 @@ function HomePageContent() {
     }
   }, [])
 
-  const uploadAudioFile = useCallback(async (activeSessionId: string, file: File): Promise<void> => {
+  const uploadAudioFile = useCallback(
+    async (activeSessionId: string, file: File, encounterId: string, createdAt: string): Promise<void> => {
     const baseUrl = apiBaseUrlRef.current
     const url = baseUrl
       ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
@@ -786,6 +799,8 @@ function HomePageContent() {
         const formData = new FormData()
         formData.append("session_id", activeSessionId)
         formData.append("file", file, file.name || `${activeSessionId}-upload`)
+        if (encounterId) formData.append("encounter_id", encounterId)
+        if (createdAt) formData.append("created_at", createdAt)
         response = await fetch(url, { method: "POST", body: formData })
       } catch (networkError) {
         if (attempt < maxAttempts) {
@@ -884,7 +899,7 @@ function HomePageContent() {
         debugWarn("Audio compression failed; uploading original file", compressionError)
       }
 
-      await uploadAudioFile(session, uploadFile)
+      await uploadAudioFile(session, uploadFile, encounter.id, encounter.created_at)
     } catch (err) {
       debugError("Failed to upload recording:", err)
       setTranscriptionErrorMessage((previous) => previous || "Failed to transcribe the uploaded file.")
@@ -921,7 +936,7 @@ function HomePageContent() {
 
     const activeSessionId = sessionIdRef.current
     if (activeSessionId) {
-      void uploadFinalRecording(activeSessionId, audioBlob)
+      void uploadFinalRecording(activeSessionId, audioBlob, encounter.id, encounter.created_at)
     } else {
       debugError("Missing session identifier for final upload")
       setTranscriptionErrorMessage("Missing session identifier for transcription.")
@@ -946,7 +961,7 @@ function HomePageContent() {
     setTranscriptionStatus("in-progress")
     setWorkflowError(null)
     try {
-      await uploadFinalRecording(activeSessionId, blob)
+      await uploadFinalRecording(activeSessionId, blob, currentEncounter?.id ?? "", currentEncounter?.created_at ?? "")
     } catch {
       // handled in uploadFinalRecording
     }

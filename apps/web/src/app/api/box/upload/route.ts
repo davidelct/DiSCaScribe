@@ -1,8 +1,7 @@
 import type { NextRequest } from "next/server"
 import { resolveTranscriptionProvider } from "@transcription"
-import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
-import { archiveConsultation, getBoxConfig } from "@/lib/box"
+import { archiveNoteAndMetadata, getBoxConfig } from "@/lib/box"
 
 export const runtime = "nodejs"
 
@@ -28,13 +27,15 @@ function jsonError(status: number, code: string, message: string) {
 }
 
 /**
- * Archive a completed consultation to Box: audio + diarized transcript + raw
- * Deepgram JSON + clinical note + a metadata sidecar, in one folder per consult.
+ * Phase 2 of consultation archival: write the clinical note and the
+ * metadata.json manifest to the consult's Box folder.
  *
- * The audio and raw transcript are read from the in-memory session store (stashed
- * during transcription), so the client only sends the note and lightweight
- * encounter metadata here. When Box archiving is not configured the route is a
- * graceful no-op (`{ skipped: true }`) so the consultation flow never breaks.
+ * The heavy artifacts (audio + raw Deepgram JSON + transcript) are uploaded
+ * earlier by the transcription request itself (phase 1), so this route carries
+ * only the note and lightweight encounter metadata. It targets the same folder
+ * by (created_at, encounter.id), and the manifest reflects whatever artifacts
+ * actually landed. When Box archiving is not configured the route is a graceful
+ * no-op (`{ skipped: true }`) so the consultation flow never breaks.
  */
 export async function POST(req: NextRequest) {
   let encounterId = ""
@@ -71,16 +72,17 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const artifacts = transcriptionSessionStore.getArchiveArtifacts(sessionId)
     const transcriptText = typeof transcriptField === "string" ? transcriptField : ""
     const resolvedProvider = resolveTranscriptionProvider()
     const archivedAt = new Date().toISOString()
 
-    const result = await archiveConsultation({
+    const result = await archiveNoteAndMetadata({
       config: boxConfig.config,
       encounterId: encounter.id,
       sessionId,
-      createdAt: encounter.created_at || archivedAt,
+      // Folder name must match the transcription request's phase-1 upload, which
+      // keyed off the same encounter.created_at — never the per-request time.
+      createdAt: encounter.created_at || "",
       archivedAt,
       patient: { name: encounter.patient_name || "", id: encounter.patient_id || "" },
       visitReason: encounter.visit_reason || "",
@@ -93,12 +95,7 @@ export async function POST(req: NextRequest) {
       },
       note: { text: note, model: NOTE_MODEL, format: "soap-markdown" },
       transcriptText,
-      rawTranscript: artifacts?.rawTranscript,
-      audio: artifacts?.audio,
     })
-
-    // Free the stashed audio buffer now that it's safely in Box.
-    transcriptionSessionStore.clearArchiveArtifacts(sessionId)
 
     await writeAuditEntry({
       event_type: "encounter.archived",
@@ -106,9 +103,9 @@ export async function POST(req: NextRequest) {
       success: true,
       metadata: {
         box_folder_id: result.folderId,
-        files: Object.keys(result.files),
-        audio_archived: Boolean(artifacts?.audio),
-        raw_transcript_archived: artifacts?.rawTranscript != null,
+        files: result.artifacts,
+        audio_archived: result.artifacts.some((name) => /^audio\./.test(name)),
+        raw_transcript_archived: result.artifacts.includes("raw_transcript.json"),
       },
     })
 
