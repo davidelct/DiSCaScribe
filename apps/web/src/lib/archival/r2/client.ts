@@ -117,10 +117,15 @@ export class R2Client implements StorageClient {
   ): Promise<StorageFileRef> {
     const key = `${containerId}/${name}`
     const url = `${this.endpoint}/${this.bucket}/${encodeKeyPath(key)}`
+    // Copy into a standalone ArrayBuffer so the body has a known byte length and
+    // an explicit Content-Length. Without it, larger binary bodies (e.g. audio)
+    // are sent chunked and R2's PutObject rejects them with 411 Length Required.
+    const body = new Uint8Array(data.byteLength)
+    body.set(data)
     const res = await this.aws.fetch(url, {
       method: "PUT",
-      headers: { "Content-Type": contentType },
-      body: new Uint8Array(data),
+      headers: { "Content-Type": contentType, "Content-Length": String(body.byteLength) },
+      body,
     })
     if (!res.ok) {
       throw new R2ApiError(`R2 upload failed for "${key}" (${res.status})`, res.status, await res.text())
