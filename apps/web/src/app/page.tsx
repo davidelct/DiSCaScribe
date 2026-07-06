@@ -722,17 +722,35 @@ function HomePageContent() {
       attempt = 1,
     ): Promise<void> => {
     try {
+      // Recordings are raw 16 kHz mono WAV (~1.9 MB/min), which blows past hosted
+      // request-body limits (Vercel ~4.5 MB; Next rejects large bodies with
+      // "Failed to parse body as FormData") for consults longer than a few
+      // minutes. Compress to a small MP3 first — the same path uploaded files
+      // take — and send it to the format-agnostic upload route. Fall back to the
+      // raw WAV only if compression fails (short recordings still fit).
+      let file = new File([blob], `${activeSessionId}-full.wav`, { type: blob.type || "audio/wav" })
+      try {
+        const compressed = await compressAudioFileToMp3(file)
+        file = new File([compressed.blob], `${activeSessionId}-full.mp3`, { type: "audio/mpeg" })
+        debugLog(
+          `[final] compressed recording: ${(blob.size / 1e6).toFixed(1)}MB -> ` +
+            `${(file.size / 1e6).toFixed(2)}MB @ ${compressed.bitrateKbps}kbps`,
+        )
+      } catch (compressionError) {
+        debugWarn("Recording compression failed; uploading raw WAV", compressionError)
+      }
+
       const formData = new FormData()
       formData.append("session_id", activeSessionId)
-      formData.append("file", blob, `${activeSessionId}-full.wav`)
+      formData.append("file", file, file.name)
       // Sent so the server can file the phase-1 artifacts (audio + raw
       // transcript) under the same per-consult container the note upload uses.
       if (encounterId) formData.append("encounter_id", encounterId)
       if (createdAt) formData.append("created_at", createdAt)
       const baseUrl = apiBaseUrlRef.current
       const url = baseUrl
-        ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/final`
-        : "/api/transcription/final"
+        ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
+        : "/api/transcription/upload"
       const response = await fetch(url, {
         method: "POST",
         body: formData,
