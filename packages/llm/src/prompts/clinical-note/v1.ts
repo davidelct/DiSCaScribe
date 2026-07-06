@@ -10,7 +10,7 @@ export interface ClinicalNotePromptParams {
 }
 
 export const PROMPT_VERSION = "v3-soap"
-export const MODEL_OPTIMIZED_FOR = "claude-sonnet-4-6"
+export const MODEL_OPTIMIZED_FOR = "claude-sonnet-5"
 
 /**
  * System prompt for SOAP-format clinical note generation.

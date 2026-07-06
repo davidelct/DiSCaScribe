@@ -7,7 +7,7 @@ export const runtime = "nodejs"
 
 // The note generator's default model. Mirrored here only to record provenance
 // in metadata.json; override with ANTHROPIC_MODEL if the note model changes.
-const NOTE_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6"
+const NOTE_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-5"
 
 interface EncounterPayload {
   id: string

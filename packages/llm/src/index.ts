@@ -58,7 +58,7 @@ export async function runLLMRequest({ system, prompt, model, apiKey, jsonSchema 
     )
   }
 
-  const defaultModel = "claude-sonnet-4-6"
+  const defaultModel = "claude-sonnet-5"
   const resolvedModel = model ?? defaultModel
 
   const client = new Anthropic({
@@ -72,6 +72,12 @@ export async function runLLMRequest({ system, prompt, model, apiKey, jsonSchema 
   const requestParams: Anthropic.MessageCreateParams = {
     model: resolvedModel,
     max_tokens: 4096,
+    // Sonnet 5 turns adaptive thinking ON when `thinking` is omitted (Sonnet 4.6
+    // defaulted to off). Thinking tokens share the max_tokens budget, so leaving
+    // it on could truncate the note. Keep it disabled to preserve the prior
+    // behaviour — flip to {type: "adaptive"} (and raise max_tokens) to trade
+    // latency/cost for a potential note-quality gain.
+    thinking: { type: "disabled" },
     system: system,
     messages: [
       {
