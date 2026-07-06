@@ -10,6 +10,7 @@ import { format } from "date-fns"
 import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
+import { AudioPlayer } from "./audio-player"
 
 interface NoteEditorProps {
   encounter: Encounter
@@ -93,6 +94,8 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
                 </>
               )}
             </div>
+            {/* Compact listen-back player (hidden when no recording is stored). */}
+            <AudioPlayer encounterId={encounter.id} className="mt-3" />
           </div>
         </div>
 

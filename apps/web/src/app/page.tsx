@@ -23,6 +23,8 @@ import {
   debugError,
   debugWarn,
   initializeAuditLog,
+  saveEncounterAudio,
+  deleteEncounterAudio,
 } from "@storage"
 
 type ViewState =
@@ -741,6 +743,12 @@ function HomePageContent() {
         debugWarn("Recording compression failed; uploading raw WAV", compressionError)
       }
 
+      // Keep a local copy so the clinician can listen back to this consultation
+      // later. Best-effort — never blocks the upload.
+      if (encounterId) {
+        void saveEncounterAudio(encounterId, file).catch((e) => debugWarn("Failed to store recording for playback", e))
+      }
+
       const formData = new FormData()
       formData.append("session_id", activeSessionId)
       formData.append("file", file, file.name)
@@ -807,6 +815,10 @@ function HomePageContent() {
 
   const uploadAudioFile = useCallback(
     async (activeSessionId: string, file: File, encounterId: string, createdAt: string): Promise<void> => {
+    // Keep a local copy for later playback (best-effort).
+    if (encounterId) {
+      void saveEncounterAudio(encounterId, file).catch((e) => debugWarn("Failed to store recording for playback", e))
+    }
     const baseUrl = apiBaseUrlRef.current
     const url = baseUrl
       ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
@@ -1015,6 +1027,7 @@ function HomePageContent() {
 
   const handleDeleteEncounter = async (encounterId: string) => {
     await removeEncounter(encounterId)
+    void deleteEncounterAudio(encounterId).catch(() => undefined)
     if (currentEncounterIdRef.current === encounterId) {
       currentEncounterIdRef.current = null
     }
