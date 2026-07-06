@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { toPipelineError } from "@pipeline-errors"
+import { createPipelineError, toPipelineError } from "@pipeline-errors"
 import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
@@ -112,16 +112,9 @@ export async function POST(req: NextRequest) {
       const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
       if (isBlankTranscript(transcript)) {
-        transcriptionSessionStore.emitError(
-          sessionId,
-          "blank_audio",
-          "No detectable speech signal in the recording. Check microphone input/device and retry.",
-        )
-        return jsonError(
-          422,
-          "blank_audio",
-          "No detectable speech signal in the recording. Check microphone input/device and retry.",
-        )
+        const message = "No detectable speech signal in the recording. Check microphone input/device and retry."
+        transcriptionSessionStore.emitError(sessionId, createPipelineError("blank_audio", message, true))
+        return jsonError(422, "blank_audio", message, true)
       }
       if (likelySilentAudio) {
         console.warn("[transcription.final] low-energy capture produced transcript", {

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { toPipelineError } from "@pipeline-errors"
+import { createPipelineError, toPipelineError } from "@pipeline-errors"
 import { resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
@@ -73,12 +73,9 @@ export async function POST(req: NextRequest) {
       const latencyMs = Date.now() - startedAtMs
 
       if (isBlankTranscript(transcript)) {
-        transcriptionSessionStore.emitError(
-          sessionId,
-          "blank_audio",
-          "No detectable speech in the uploaded file. Check the audio and try again.",
-        )
-        return jsonError(422, "blank_audio", "No detectable speech in the uploaded file. Check the audio and try again.")
+        const message = "No detectable speech in the uploaded file. Check the audio and try again."
+        transcriptionSessionStore.emitError(sessionId, createPipelineError("blank_audio", message, true))
+        return jsonError(422, "blank_audio", message, true)
       }
 
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
