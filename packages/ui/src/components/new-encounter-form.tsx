@@ -21,21 +21,14 @@ interface NewEncounterFormProps {
   onUpload?: (data: EncounterFormData, file: File) => void
 }
 
-const VISIT_TYPE_OPTIONS = [
-  { label: "History & Physical", value: "history_physical" },
-  { label: "Problem Visit", value: "problem_visit" },
-  { label: "Consult Note", value: "consult_note" },
-]
-
 export function NewEncounterForm({ onStart, onCancel, onUpload }: NewEncounterFormProps) {
   const [patientName, setPatientName] = useState("")
-  const [visitType, setVisitType] = useState(VISIT_TYPE_OPTIONS[0]?.value ?? "")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const currentData = (): EncounterFormData => ({
     patient_name: patientName,
     patient_id: "",
-    visit_reason: visitType,
+    visit_reason: "",
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -71,24 +64,6 @@ export function NewEncounterForm({ onStart, onCancel, onUpload }: NewEncounterFo
             onChange={(e) => setPatientName(e.target.value)}
             className="h-11 rounded-xl border-border bg-background"
           />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="visit-type" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Note Type
-          </Label>
-          <select
-            id="visit-type"
-            value={visitType}
-            onChange={(e) => setVisitType(e.target.value)}
-            className="h-11 w-full rounded-xl border border-border bg-background px-4 text-sm text-foreground transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-          >
-            {VISIT_TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
         </div>
 
         <div className="flex gap-3 pt-3">

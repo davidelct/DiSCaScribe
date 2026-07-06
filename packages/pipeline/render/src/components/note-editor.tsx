@@ -11,12 +11,6 @@ import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
 
-const VISIT_TYPE_LABELS: Record<string, string> = {
-  history_physical: "History & Physical",
-  problem_visit: "Problem Visit",
-  consult_note: "Consult Note",
-}
-
 interface NoteEditorProps {
   encounter: Encounter
   onSave: (noteText: string) => void
@@ -95,7 +89,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
               {encounter.visit_reason && (
                 <>
                   <span className="text-border">·</span>
-                  <span>{VISIT_TYPE_LABELS[encounter.visit_reason] || encounter.visit_reason}</span>
+                  <span>{encounter.visit_reason}</span>
                 </>
               )}
             </div>

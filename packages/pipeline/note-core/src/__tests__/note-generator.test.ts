@@ -36,7 +36,7 @@ test("createClinicalNoteText returns valid markdown structure", async () => {
   const result = await createClinicalNoteText({
     transcript: "Patient reports foot pain for the last week. Pain is worse when walking.",
     patient_name: "Test Patient",
-    visit_reason: "history_physical",
+    visit_reason: "Follow-up visit",
   })
 
   // Should be valid markdown with sections
@@ -61,7 +61,7 @@ test("createClinicalNoteText generates appropriate content from transcript", asy
   const result = await createClinicalNoteText({
     transcript,
     patient_name: "Test Patient",
-    visit_reason: "history_physical",
+    visit_reason: "Follow-up visit",
   })
 
   const sections = parseMarkdownNote(result)
@@ -90,7 +90,7 @@ test("createClinicalNoteText does not invent information", async () => {
   const result = await createClinicalNoteText({
     transcript,
     patient_name: "Test Patient",
-    visit_reason: "history_physical",
+    visit_reason: "Follow-up visit",
   })
 
   const sections = parseMarkdownNote(result)
