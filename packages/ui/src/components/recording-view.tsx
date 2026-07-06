@@ -1,14 +1,17 @@
 "use client"
 
 import { Button } from "@ui/lib/ui/button"
-import { Mic, Square, Pause, Play } from "lucide-react"
+import { Square, Pause, Play } from "lucide-react"
 import { cn } from "@ui/lib/utils"
+import { WaveformVisualizer } from "./waveform-visualizer"
 
 interface RecordingViewProps {
   patientName: string
   patientId: string
   duration: number
   isPaused: boolean
+  /** Live mic analyser for the waveform; null until recording is running. */
+  analyser: AnalyserNode | null
   onStop: () => void
   onPause: () => void
   onResume: () => void
@@ -25,6 +28,7 @@ export function RecordingView({
   patientId,
   duration,
   isPaused,
+  analyser,
   onStop,
   onPause,
   onResume,
@@ -39,22 +43,9 @@ export function RecordingView({
         {patientId && <p className="mt-1 text-sm text-muted-foreground">ID: {patientId}</p>}
       </div>
 
-      <div className="relative mb-10">
-        <div
-          className={cn(
-            "flex h-32 w-32 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lifted transition-all duration-500",
-            !isPaused ? "animate-breathe" : "opacity-80 grayscale-[35%]",
-          )}
-        >
-          <Mic className={cn("h-12 w-12 transition-opacity", isPaused && "opacity-60")} />
-        </div>
-        {!isPaused && (
-          <span className="absolute right-1 top-1 flex h-4 w-4">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
-            <span className="relative inline-flex h-4 w-4 rounded-full bg-primary ring-2 ring-background" />
-          </span>
-        )}
-      </div>
+      {/* Live microphone waveform — real signal, so the clinician can see their
+          voice is being captured. */}
+      <WaveformVisualizer analyser={analyser} isPaused={isPaused} className="mb-8 h-24 w-full max-w-sm" />
 
       {/* Status text */}
       <div className="mb-3 flex items-center gap-2">

@@ -48,6 +48,8 @@ interface UseAudioRecorderReturn {
   resumeRecording: () => void
   error: PipelineError | null
   errorCode: string | null
+  /** Live Web Audio analyser tapping the mic input for visualisation; null while not recording. */
+  analyser: AnalyserNode | null
 }
 
 export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudioRecorderReturn {
@@ -57,6 +59,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<PipelineError | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
 
   const micStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -98,6 +101,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
   const cleanupAudio = useCallback(async () => {
     processorRef.current?.disconnect()
     processorRef.current = null
+    setAnalyser(null)
 
     if (audioContextRef.current) {
       await audioContextRef.current.close().catch(() => undefined)
@@ -230,6 +234,15 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
       const micSource = audioContext.createMediaStreamSource(microphoneStream)
       micSource.connect(mixNode)
 
+      // Passive tap for live visualisation. An analyser is a read-only sink; it
+      // is not connected onward to the destination, so it never affects the
+      // recorded audio or the transcription pipeline.
+      const liveAnalyser = audioContext.createAnalyser()
+      liveAnalyser.fftSize = 1024
+      liveAnalyser.smoothingTimeConstant = 0.8
+      micSource.connect(liveAnalyser)
+      setAnalyser(liveAnalyser)
+
       await setupProcessor(audioContext, mixNode)
 
       setIsRecording(true)
@@ -334,5 +347,6 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
     resumeRecording,
     error,
     errorCode,
+    analyser,
   }
 }

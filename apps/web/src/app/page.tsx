@@ -321,6 +321,7 @@ function HomePageContent() {
     pauseRecording,
     resumeRecording,
     error: recordingError,
+    analyser,
   } = useAudioRecorder({
     onSegmentReady: handleSegmentReady,
     segmentDurationMs: SEGMENT_DURATION_MS,
@@ -1050,6 +1051,7 @@ function HomePageContent() {
               patientId={currentEncounter?.patient_id || ""}
               duration={duration}
               isPaused={isPaused}
+              analyser={analyser}
               onStop={handleStopRecording}
               onPause={handlePauseRecording}
               onResume={handleResumeRecording}
