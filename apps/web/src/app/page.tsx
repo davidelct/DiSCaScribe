@@ -69,7 +69,7 @@ function resolveApiBaseUrl(): string {
   return "http://localhost:3001"
 }
 
-interface BoxArchivePayload {
+interface ArchivePayload {
   session_id: string
   encounter: {
     id: string
@@ -84,7 +84,7 @@ interface BoxArchivePayload {
   transcript: string
 }
 
-interface BoxArchiveResponse {
+interface ArchiveResponse {
   ok?: boolean
   skipped?: boolean
   folderId?: string
@@ -92,23 +92,23 @@ interface BoxArchiveResponse {
 }
 
 /**
- * Ask the server to finish archiving a completed consultation to Box (phase 2:
- * note + metadata manifest). The heavy artifacts (audio + raw transcript) were
- * already uploaded by the transcription request, so this carries only the note
- * and lightweight encounter metadata. Throws on a non-OK response; callers
- * handle it best-effort.
+ * Ask the server to finish archiving a completed consultation (phase 2: note +
+ * metadata manifest) to the configured storage backend. The heavy artifacts
+ * (audio + raw transcript) were already uploaded by the transcription request,
+ * so this carries only the note and lightweight encounter metadata. Throws on a
+ * non-OK response; callers handle it best-effort.
  */
-async function requestBoxArchive(baseUrl: string, payload: BoxArchivePayload): Promise<BoxArchiveResponse> {
-  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/box/upload` : "/api/box/upload"
+async function requestArchive(baseUrl: string, payload: ArchivePayload): Promise<ArchiveResponse> {
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/archive/note` : "/api/archive/note"
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   })
   if (!res.ok) {
-    throw new Error(`Box archive failed (${res.status})`)
+    throw new Error(`Archive failed (${res.status})`)
   }
-  return (await res.json()) as BoxArchiveResponse
+  return (await res.json()) as ArchiveResponse
 }
 
 function HomePageContent() {
@@ -449,14 +449,14 @@ function HomePageContent() {
         setView({ type: "viewing", encounterId })
 
         // Best-effort: archive the completed consultation (audio + transcript +
-        // raw transcript + note + metadata) to Box. Runs detached so it never
-        // blocks the UI, and a Box outage or missing config never fails the
-        // encounter — it only updates box_status.
+        // raw transcript + note + metadata) to the configured storage backend.
+        // Runs detached so it never blocks the UI, and an archival outage or
+        // missing config never fails the encounter — it only updates archive_status.
         void (async () => {
           const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
           if (!enc?.session_id) return
           try {
-            const data = await requestBoxArchive(apiBaseUrlRef.current, {
+            const data = await requestArchive(apiBaseUrlRef.current, {
               session_id: enc.session_id,
               encounter: {
                 id: enc.id,
@@ -471,18 +471,18 @@ function HomePageContent() {
               transcript,
             })
             if (data.skipped) {
-              await updateEncounterRef.current(encounterId, { box_status: "skipped" })
+              await updateEncounterRef.current(encounterId, { archive_status: "skipped" })
             } else {
               await updateEncounterRef.current(encounterId, {
-                box_status: "archived",
-                box_folder_id: data.folderId,
-                box_archived_at: new Date().toISOString(),
+                archive_status: "archived",
+                archive_location: data.folderId,
+                archived_at: new Date().toISOString(),
               })
-              debugLog(`✅ Consultation archived to Box (folder ${data.folderId})`)
+              debugLog(`✅ Consultation archived (container ${data.folderId})`)
             }
           } catch (archiveError) {
-            debugError("Box archive failed", archiveError)
-            await updateEncounterRef.current(encounterId, { box_status: "failed" })
+            debugError("Archive failed", archiveError)
+            await updateEncounterRef.current(encounterId, { archive_status: "failed" })
           }
         })()
       } catch (err) {
@@ -725,8 +725,8 @@ function HomePageContent() {
       const formData = new FormData()
       formData.append("session_id", activeSessionId)
       formData.append("file", blob, `${activeSessionId}-full.wav`)
-      // Sent so the server can file the Box phase-1 artifacts (audio + raw
-      // transcript) under the same per-consult folder the note upload uses.
+      // Sent so the server can file the phase-1 artifacts (audio + raw
+      // transcript) under the same per-consult container the note upload uses.
       if (encounterId) formData.append("encounter_id", encounterId)
       if (createdAt) formData.append("created_at", createdAt)
       const baseUrl = apiBaseUrlRef.current

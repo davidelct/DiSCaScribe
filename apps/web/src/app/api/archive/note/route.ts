@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server"
 import { resolveTranscriptionProvider } from "@transcription"
 import { writeAuditEntry } from "@storage/audit-log"
-import { archiveNoteAndMetadata, getBoxConfig } from "@/lib/box"
+import { archiveNoteAndMetadata, getArchivalConfig } from "@/lib/archival"
 
 export const runtime = "nodejs"
 
@@ -28,14 +28,14 @@ function jsonError(status: number, code: string, message: string) {
 
 /**
  * Phase 2 of consultation archival: write the clinical note and the
- * metadata.json manifest to the consult's Box folder.
+ * metadata.json manifest to the consult's container (Box folder / R2 prefix).
  *
  * The heavy artifacts (audio + raw Deepgram JSON + transcript) are uploaded
  * earlier by the transcription request itself (phase 1), so this route carries
- * only the note and lightweight encounter metadata. It targets the same folder
- * by (created_at, encounter.id), and the manifest reflects whatever artifacts
- * actually landed. When Box archiving is not configured the route is a graceful
- * no-op (`{ skipped: true }`) so the consultation flow never breaks.
+ * only the note and lightweight encounter metadata. It targets the same
+ * container by (created_at, encounter.id), and the manifest reflects whatever
+ * artifacts actually landed. When archiving is not configured the route is a
+ * graceful no-op (`{ skipped: true }`) so the consultation flow never breaks.
  */
 export async function POST(req: NextRequest) {
   let encounterId = ""
@@ -64,10 +64,10 @@ export async function POST(req: NextRequest) {
     encounterId = encounter.id
     const transcriptField = body.transcript
 
-    const boxConfig = getBoxConfig()
-    if (!boxConfig.enabled) {
-      // Not an error — Box is simply not set up. Tell the client to mark it skipped.
-      return new Response(JSON.stringify({ skipped: true, reason: boxConfig.reason }), {
+    const archival = getArchivalConfig()
+    if (!archival.enabled) {
+      // Not an error — archival is simply not set up. Tell the client to mark it skipped.
+      return new Response(JSON.stringify({ skipped: true, reason: archival.reason }), {
         headers: { "Content-Type": "application/json" },
       })
     }
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     const archivedAt = new Date().toISOString()
 
     const result = await archiveNoteAndMetadata({
-      config: boxConfig.config,
+      client: archival.client,
       encounterId: encounter.id,
       sessionId,
       // Folder name must match the transcription request's phase-1 upload, which
@@ -102,7 +102,8 @@ export async function POST(req: NextRequest) {
       resource_id: encounter.id,
       success: true,
       metadata: {
-        box_folder_id: result.folderId,
+        storage_backend: archival.backend,
+        folder_id: result.folderId,
         files: result.artifacts,
         audio_archived: result.artifacts.some((name) => /^audio\./.test(name)),
         raw_transcript_archived: result.artifacts.includes("raw_transcript.json"),
@@ -119,13 +120,13 @@ export async function POST(req: NextRequest) {
       { headers: { "Content-Type": "application/json" } },
     )
   } catch (error) {
-    console.error("Box archive failed", error)
+    console.error("Archive failed", error)
     await writeAuditEntry({
       event_type: "encounter.archive_failed",
       resource_id: encounterId || undefined,
       success: false,
-      error_message: error instanceof Error ? error.message : "Box archive failed",
+      error_message: error instanceof Error ? error.message : "Archive failed",
     })
-    return jsonError(502, "box_archive_error", error instanceof Error ? error.message : "Box archive failed")
+    return jsonError(502, "archive_error", error instanceof Error ? error.message : "Archive failed")
   }
 }

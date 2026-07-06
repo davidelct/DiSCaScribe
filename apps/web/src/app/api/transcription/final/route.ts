@@ -3,7 +3,7 @@ import { toPipelineError } from "@pipeline-errors"
 import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
-import { archiveTranscriptionArtifacts, getBoxConfig } from "@/lib/box"
+import { archiveTranscriptionArtifacts, getArchivalConfig } from "@/lib/archival"
 
 export const runtime = "nodejs"
 
@@ -74,8 +74,8 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData()
     const sessionId = formData.get("session_id")
     const file = formData.get("file")
-    // Optional, only sent when Box archival is on — used to file phase-1
-    // artifacts under the same per-consult folder as the later note upload.
+    // Optional, only sent when archival is on — used to file phase-1
+    // artifacts under the same per-consult container as the later note upload.
     const encounterId = typeof formData.get("encounter_id") === "string" ? String(formData.get("encounter_id")) : ""
     const createdAt = typeof formData.get("created_at") === "string" ? String(formData.get("created_at")) : ""
 
@@ -131,26 +131,26 @@ export async function POST(req: NextRequest) {
       }
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
 
-      // Phase 1 of Box archival: upload the audio + raw Deepgram JSON +
-      // transcript from *this* request, which holds the bytes. Doing it here
-      // (rather than stashing in memory for a later request) keeps archival
-      // correct on serverless, where the later request may hit a different
-      // instance. Best-effort: the transcript was already delivered via the SSE
-      // `final` event above, so a Box failure never affects transcription.
+      // Phase 1 of archival: upload the audio + raw Deepgram JSON + transcript
+      // from *this* request, which holds the bytes. Doing it here (rather than
+      // stashing in memory for a later request) keeps archival correct on
+      // serverless, where the later request may hit a different instance.
+      // Best-effort: the transcript was already delivered via the SSE `final`
+      // event above, so an archival failure never affects transcription.
       if (encounterId) {
-        const boxConfig = getBoxConfig()
-        if (boxConfig.enabled) {
+        const archival = getArchivalConfig()
+        if (archival.enabled) {
           try {
             await archiveTranscriptionArtifacts({
-              config: boxConfig.config,
+              client: archival.client,
               encounterId,
               createdAt,
               transcriptText: transcript,
               rawTranscript: detail.raw,
               audio: { buffer: Buffer.from(arrayBuffer), contentType: "audio/wav", filename: "audio.wav" },
             })
-          } catch (boxError) {
-            console.error("[box] phase-1 archive failed (recording)", boxError)
+          } catch (archiveError) {
+            console.error("[archival] phase-1 archive failed (recording)", archiveError)
           }
         }
       }

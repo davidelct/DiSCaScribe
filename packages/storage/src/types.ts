@@ -24,21 +24,21 @@ export interface Encounter {
   status: EncounterStatus
   language: string
   recording_duration?: number
-  /** Box archival state, when Box archiving is enabled (see /api/box/upload). */
-  box_status?: BoxArchiveStatus
-  /** ID of the per-consultation folder created in Box. */
-  box_folder_id?: string
-  /** ISO 8601 timestamp of the last successful archive to Box. */
-  box_archived_at?: string
+  /** Archival state, when archiving is enabled (see /api/archive/note). */
+  archive_status?: ArchiveStatus
+  /** Per-consultation container id (Box folder id, or R2 key prefix). */
+  archive_location?: string
+  /** ISO 8601 timestamp of the last successful archive. */
+  archived_at?: string
 }
 
 /**
- * Archive state for a consultation's copy in Box.
+ * Archive state for a consultation's copy in the configured storage backend.
  * - archived: all artifacts uploaded successfully
  * - failed: an upload attempt errored (retryable)
- * - skipped: Box archiving is not configured, so nothing was uploaded
+ * - skipped: archiving is not configured, so nothing was uploaded
  */
-export type BoxArchiveStatus = "archived" | "failed" | "skipped"
+export type ArchiveStatus = "archived" | "failed" | "skipped"
 
 /**
  * Audit event types for HIPAA compliance tracking

@@ -1,15 +1,15 @@
 /**
- * Archive one consultation to Box, in two phases.
+ * Archive one consultation to the configured storage backend, in two phases.
  *
- * Lays out a self-contained, analyzable folder per consultation:
+ * Lays out a self-contained, analyzable container per consultation (a Box
+ * folder, or an R2 key prefix):
  *
- *   <Working folder>/
- *     <YYYY-MM-DD>_<encounterId>/
- *       audio.wav            the consult recording (omitted if unavailable)
- *       transcript.txt       Deepgram transcript, diarized (Speaker N: …)
- *       raw_transcript.json  Deepgram's full response (word timings, confidence)
- *       note.md              Claude-generated SOAP note
- *       metadata.json        structured sidecar tying it all together
+ *   <container>/
+ *     audio.wav            the consult recording (omitted if unavailable)
+ *     transcript.txt       Deepgram transcript, diarized (Speaker N: …)
+ *     raw_transcript.json  Deepgram's full response (word timings, confidence)
+ *     note.md              Claude-generated SOAP note
+ *     metadata.json        structured sidecar tying it all together
  *
  * The two phases exist because the artifacts become available in different
  * requests, and on serverless the safe rule is "upload from the request that
@@ -20,17 +20,16 @@
  *   - Phase 2 (archiveNoteAndMetadata) runs once the clinical note exists, and
  *     writes note.md plus the metadata.json manifest.
  *
- * Both phases derive the same folder name from (createdAt, encounterId) and
- * uploads are version-on-conflict idempotent, so they compose regardless of
- * order or which instance each runs on.
+ * Both phases derive the same container name from (createdAt, encounterId) and
+ * uploads are idempotent (Box writes a new version; R2 overwrites the key), so
+ * they compose regardless of order or which instance each runs on.
  *
- * The folder name deliberately avoids PHI (uses the encounter id, not the
+ * The container name deliberately avoids PHI (uses the encounter id, not the
  * patient name); identifying detail lives inside metadata.json within the
- * access-controlled folder.
+ * access-controlled container.
  */
 
-import type { BoxConfig } from "./config"
-import { BoxClient, type BoxFileRef } from "./client"
+import type { StorageClient, StorageFileRef } from "./types"
 
 const METADATA_SCHEMA_VERSION = 1
 
@@ -44,17 +43,13 @@ function datePrefix(iso: string): string {
   return trimmed ? trimmed.slice(0, 10) : "undated"
 }
 
-function folderNameFor(createdAt: string, encounterId: string): string {
+function containerNameFor(createdAt: string, encounterId: string): string {
   return `${datePrefix(createdAt)}_${encounterId}`
 }
 
 function audioExtension(filename: string): string {
   const match = /\.([A-Za-z0-9]+)$/.exec(filename)
   return match ? `.${match[1].toLowerCase()}` : ".wav"
-}
-
-function folderUrlFor(folderId: string): string {
-  return `https://app.box.com/folder/${folderId}`
 }
 
 export interface ArchiveAudioInput {
@@ -68,9 +63,9 @@ export interface ArchiveAudioInput {
 // ---------------------------------------------------------------------------
 
 export interface ArchiveTranscriptionInput {
-  config: BoxConfig
+  client: StorageClient
   encounterId: string
-  /** Encounter creation timestamp; only the date is used (for the folder name). */
+  /** Encounter creation timestamp; only the date is used (for the container name). */
   createdAt: string
   transcriptText: string
   rawTranscript?: unknown
@@ -86,20 +81,17 @@ export interface TranscriptionArchiveResult {
 
 /**
  * Upload the audio, raw Deepgram JSON, and diarized transcript to the consult's
- * Box folder. Creates (or reuses) the folder and writes each artifact as a new
- * version if it already exists.
+ * container. Creates (or reuses) the container and writes each artifact,
+ * overwriting any prior copy.
  */
 export async function archiveTranscriptionArtifacts(
   input: ArchiveTranscriptionInput,
 ): Promise<TranscriptionArchiveResult> {
-  const client = BoxClient.fromConfig(input.config)
-  // ensureSubfolder mints + caches the auth token first, so the parallel
-  // uploads below reuse it instead of each minting their own.
-  const folderId = await client.ensureSubfolder(
-    input.config.folderId,
-    folderNameFor(input.createdAt, input.encounterId),
+  const { client } = input
+  const containerId = await client.ensureContainer(
+    containerNameFor(input.createdAt, input.encounterId),
   )
-  const existing = await client.listFolderFiles(folderId)
+  const existing = await client.listFiles(containerId)
 
   const jobs: Array<{ name: string; data: Buffer; contentType: string }> = []
   if (input.audio) {
@@ -126,12 +118,12 @@ export async function archiveTranscriptionArtifacts(
 
   const uploaded = await Promise.all(
     jobs.map(async (job) => {
-      await client.uploadFile(folderId, job.name, job.data, job.contentType, existing.get(job.name)?.id)
+      await client.uploadFile(containerId, job.name, job.data, job.contentType, existing.get(job.name)?.id)
       return job.name
     }),
   )
 
-  return { folderId, folderUrl: folderUrlFor(folderId), uploaded }
+  return { folderId: containerId, folderUrl: client.containerUrl(containerId), uploaded }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +131,7 @@ export async function archiveTranscriptionArtifacts(
 // ---------------------------------------------------------------------------
 
 export interface ArchiveNoteInput {
-  config: BoxConfig
+  client: StorageClient
   encounterId: string
   sessionId: string
   createdAt: string
@@ -157,28 +149,27 @@ export interface ArchiveNoteInput {
 export interface ArchiveResult {
   folderId: string
   folderUrl: string
-  files: Record<string, BoxFileRef>
-  /** Every artifact present in the folder after this phase. */
+  files: Record<string, StorageFileRef>
+  /** Every artifact present in the container after this phase. */
   artifacts: string[]
 }
 
 /**
- * Write note.md and the metadata.json manifest to the consult's folder. The
+ * Write note.md and the metadata.json manifest to the consult's container. The
  * manifest reflects which artifacts actually landed (phase 1 may have partially
  * failed or not run), and transcript.txt is backfilled here if it is missing.
  */
 export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<ArchiveResult> {
-  const client = BoxClient.fromConfig(input.config)
-  const folderId = await client.ensureSubfolder(
-    input.config.folderId,
-    folderNameFor(input.createdAt, input.encounterId),
+  const { client } = input
+  const containerId = await client.ensureContainer(
+    containerNameFor(input.createdAt, input.encounterId),
   )
-  const existing = await client.listFolderFiles(folderId)
+  const existing = await client.listFiles(containerId)
 
-  const files: Record<string, BoxFileRef> = {}
+  const files: Record<string, StorageFileRef> = {}
 
   files["note.md"] = await client.uploadFile(
-    folderId,
+    containerId,
     "note.md",
     Buffer.from(input.note.text, "utf8"),
     "text/markdown; charset=utf-8",
@@ -189,14 +180,14 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
   // consult came through a path that skipped phase 1).
   if (!existing.has("transcript.txt") && input.transcriptText) {
     files["transcript.txt"] = await client.uploadFile(
-      folderId,
+      containerId,
       "transcript.txt",
       Buffer.from(input.transcriptText, "utf8"),
       "text/plain; charset=utf-8",
     )
   }
 
-  // Truth comes from the folder, not from what we expected to upload.
+  // Truth comes from the container, not from what we expected to upload.
   const present = new Set<string>([...existing.keys(), ...Object.keys(files)])
   const audioName = [...present].find((name) => /^audio\./.test(name)) ?? null
 
@@ -222,7 +213,7 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
   }
 
   files["metadata.json"] = await client.uploadFile(
-    folderId,
+    containerId,
     "metadata.json",
     Buffer.from(JSON.stringify(metadata, null, 2), "utf8"),
     "application/json",
@@ -230,5 +221,5 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
   )
 
   present.add("metadata.json")
-  return { folderId, folderUrl: folderUrlFor(folderId), files, artifacts: [...present] }
+  return { folderId: containerId, folderUrl: client.containerUrl(containerId), files, artifacts: [...present] }
 }
