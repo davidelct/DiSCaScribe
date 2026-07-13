@@ -127,6 +127,61 @@ export async function archiveTranscriptionArtifacts(
 }
 
 // ---------------------------------------------------------------------------
+// Stimulated recall — recall-interview audio + session data, uploaded when the
+// clinician finishes a recall session (any time after the consultation).
+// ---------------------------------------------------------------------------
+
+export interface ArchiveRecallInput {
+  client: StorageClient
+  encounterId: string
+  /** Encounter creation timestamp; only the date is used (for the container name). */
+  createdAt: string
+  /** The recall-interview recording. */
+  audio?: ArchiveAudioInput
+  /** Recall session data (hypotheses + cue ratings), stored as JSON. */
+  session?: unknown
+}
+
+/**
+ * Upload the stimulated-recall artifacts to the consultation's container:
+ * recall_audio.<ext> (the recorded recall interview) and recall_session.json
+ * (hypotheses + cue ratings). Overwrites prior copies, so a re-run recall
+ * session replaces the previous one.
+ */
+export async function archiveRecallArtifacts(input: ArchiveRecallInput): Promise<TranscriptionArchiveResult> {
+  const { client } = input
+  const containerId = await client.ensureContainer(
+    containerNameFor(input.createdAt, input.encounterId),
+  )
+  const existing = await client.listFiles(containerId)
+
+  const jobs: Array<{ name: string; data: Buffer; contentType: string }> = []
+  if (input.audio) {
+    jobs.push({
+      name: `recall_audio${audioExtension(input.audio.filename)}`,
+      data: input.audio.buffer,
+      contentType: input.audio.contentType,
+    })
+  }
+  if (input.session !== undefined && input.session !== null) {
+    jobs.push({
+      name: "recall_session.json",
+      data: Buffer.from(JSON.stringify(input.session, null, 2), "utf8"),
+      contentType: "application/json",
+    })
+  }
+
+  const uploaded = await Promise.all(
+    jobs.map(async (job) => {
+      await client.uploadFile(containerId, job.name, job.data, job.contentType, existing.get(job.name)?.id)
+      return job.name
+    }),
+  )
+
+  return { folderId: containerId, folderUrl: client.containerUrl(containerId), uploaded }
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2 — note + metadata manifest, uploaded once the note exists.
 // ---------------------------------------------------------------------------
 

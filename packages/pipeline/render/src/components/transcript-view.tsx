@@ -6,7 +6,7 @@ interface TranscriptViewProps {
   text: string
 }
 
-interface TranscriptTurn {
+export interface TranscriptTurn {
   speaker: number
   text: string
 }
@@ -49,7 +49,7 @@ function speakerStyle(speaker: number) {
  * caller can fall back to plain rendering). Lines without a speaker prefix are
  * appended to the previous turn (defensive against wrapped/multi-line text).
  */
-function parseDiarizedTranscript(raw: string): TranscriptTurn[] | null {
+export function parseDiarizedTranscript(raw: string): TranscriptTurn[] | null {
   const turns: TranscriptTurn[] = []
   let matchedAny = false
 
