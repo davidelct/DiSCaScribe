@@ -191,6 +191,13 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
     setNoteMode("preview")
   }
 
+  // Throw the edit away: back to the stored note, no version bump.
+  const handleDiscard = () => {
+    setNoteMarkdown(encounter.note_text || "")
+    setHasChanges(false)
+    setNoteMode("preview")
+  }
+
   const handleCopy = async () => {
     const textToCopy = activeTab === "note" ? noteMarkdown : encounter.transcript_text
     await navigator.clipboard.writeText(textToCopy)
@@ -321,15 +328,27 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
                   <span className="text-xs">Edit</span>
                 </Button>
               ) : (
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  title="Save your edits as the next note version"
-                  className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
-                >
-                  <Save className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">Save</span>
-                </Button>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDiscard}
+                    title="Discard your edits and keep the current version"
+                    className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="mr-1.5 h-4 w-4" />
+                    <span className="text-xs">Discard</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSave}
+                    title="Save your edits as the next note version"
+                    className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
+                  >
+                    <Save className="mr-1.5 h-4 w-4" />
+                    <span className="text-xs">Save</span>
+                  </Button>
+                </>
               ))}
             {showCopyExport && (
               <>
