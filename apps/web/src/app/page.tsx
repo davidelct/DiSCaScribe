@@ -9,11 +9,10 @@ import {
   type PipelineError,
 } from "@pipeline-errors"
 import type { Encounter, EncounterMode } from "@storage/types"
-import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, useHttpsWarning } from "@ui"
+import { useEncounters, EncounterList, IdleView, NewEncounterForm, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, useHttpsWarning } from "@ui"
 import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
 import { useSegmentUpload, type UploadError } from "@transcription";
-import { WorkflowErrorDisplay } from "./workflow-error-display"
 import { generateClinicalNote } from "@/app/actions"
 import {
   getPreferences,
@@ -130,7 +129,9 @@ function HomePageContent() {
   // recording. Deepgram (the only provider) is final-pass only, so this
   // defaults false; the server confirms via /api/settings/transcription-status.
   const [liveSegmentsEnabled, setLiveSegmentsEnabled] = useState(false)
-  const [workflowError, setWorkflowError] = useState<PipelineError | null>(null)
+  // Retained as pipeline-error state (set by every failure path); the visible
+  // error surface is the capture tab's error rows via transcriptionErrorMessage.
+  const [_workflowError, setWorkflowError] = useState<PipelineError | null>(null)
 
   const currentEncounterIdRef = useRef<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
@@ -1006,6 +1007,14 @@ function HomePageContent() {
     })
 
     const audioBlob = await stopRecording()
+    if (audioBlob) {
+      // Store the raw recording immediately so playback appears the moment the
+      // capture stops; the compressed copy replaces it once upload prep is done.
+      void saveEncounterAudio(
+        encounter.id,
+        new File([audioBlob], `${encounter.id}-recording.wav`, { type: audioBlob.type || "audio/wav" }),
+      ).catch((e) => debugWarn("Failed to store raw recording for playback", e))
+    }
     if (!audioBlob) {
       setTranscriptionErrorMessage("No recording captured. Check microphone input/device and retry.")
       setWorkflowError(
@@ -1065,7 +1074,6 @@ function HomePageContent() {
   }
 
   const currentEncounter = encounters.find((e: Encounter) => "encounterId" in view && e.id === view.encounterId)
-  const selectedEncounter = view.type === "viewing" ? encounters.find((e: Encounter) => e.id === view.encounterId) : null
 
   const handleSelectEncounter = (encounter: Encounter) => {
     if (view.type === "recording") return
@@ -1073,13 +1081,15 @@ function HomePageContent() {
   }
 
   const handleSaveNote = async (noteText: string) => {
-    if (!selectedEncounter) return
-    await updateEncounter(selectedEncounter.id, { note_text: noteText })
+    if (!("encounterId" in view)) return
+    await updateEncounter(view.encounterId, { note_text: noteText })
   }
 
   const handleDeleteEncounter = async (encounterId: string) => {
     await removeEncounter(encounterId)
     void deleteEncounterAudio(encounterId).catch(() => undefined)
+    // The recall-interview recording is stored under a derived key.
+    void deleteEncounterAudio(`recall:${encounterId}`).catch(() => undefined)
     if (currentEncounterIdRef.current === encounterId) {
       currentEncounterIdRef.current = null
     }
@@ -1108,46 +1118,39 @@ function HomePageContent() {
             />
           </div>
         )
+      // One continuous encounter view from first word to finished note: the
+      // Capture tab renders the live recording bar, then generation progress,
+      // then the playback + transcript — the tabs unlock sequentially.
       case "recording":
-        return (
-          <div className="flex h-full items-center justify-center p-8">
-            <RecordingView
-              patientName={currentEncounter?.patient_name || ""}
-              patientId={currentEncounter?.patient_id || ""}
-              duration={duration}
-              isPaused={isPaused}
-              analyser={analyser}
-              onStop={handleStopRecording}
-              onPause={handlePauseRecording}
-              onResume={handleResumeRecording}
-            />
-          </div>
-        )
-      case "processing": {
-        const retryAction = noteGenerationStatus === "failed" ? handleRetryNoteGeneration : handleRetryTranscription
-        return (
-          <div className="flex h-full items-center justify-center p-8">
-            <div className="flex w-full flex-col items-center">
-              {workflowError && <WorkflowErrorDisplay error={workflowError} onRetry={workflowError.recoverable ? retryAction : undefined} />}
-              <ProcessingView
-                patientName={currentEncounter?.patient_name || ""}
-                transcriptionStatus={transcriptionStatus}
-                noteGenerationStatus={noteGenerationStatus}
-                transcriptionErrorMessage={transcriptionErrorMessage}
-                onRetryTranscription={handleRetryTranscription}
-                onRetryNoteGeneration={handleRetryNoteGeneration}
-                showNoteGenerationStep={currentEncounter?.mode !== "recording_only"}
-              />
-            </div>
-          </div>
-        )
+      case "processing":
+      case "viewing": {
+        const encounter = encounters.find((e: Encounter) => e.id === view.encounterId)
+        if (!encounter) {
+          return <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
+        }
+        const live =
+          view.type === "recording"
+            ? {
+                phase: "recording" as const,
+                duration,
+                isPaused,
+                analyser,
+                onStop: handleStopRecording,
+                onPause: handlePauseRecording,
+                onResume: handleResumeRecording,
+              }
+            : view.type === "processing"
+              ? {
+                  phase: "processing" as const,
+                  transcriptionStatus,
+                  noteGenerationStatus,
+                  transcriptionErrorMessage,
+                  onRetryTranscription: handleRetryTranscription,
+                  onRetryNoteGeneration: handleRetryNoteGeneration,
+                }
+              : undefined
+        return <NoteEditor encounter={encounter} onSave={handleSaveNote} live={live} />
       }
-      case "viewing":
-        return selectedEncounter ? (
-          <NoteEditor encounter={selectedEncounter} onSave={handleSaveNote} />
-        ) : (
-          <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
-        )
       default:
         return <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
     }
@@ -1189,7 +1192,6 @@ function HomePageContent() {
             onDeleteEncounter={handleDeleteEncounter}
             disabled={view.type === "recording"}
           />
-          <ModelIndicator />
           <SettingsBar onOpenSettings={handleOpenSettings} />
         </div>
         <main className="flex flex-1 flex-col overflow-hidden bg-background">

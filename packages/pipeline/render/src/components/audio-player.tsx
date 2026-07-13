@@ -6,8 +6,15 @@ import { getEncounterAudio } from "@storage"
 import { cn } from "@ui/lib/utils"
 
 interface AudioPlayerProps {
-  encounterId: string
+  /** Storage key of the recording in the audio store (encounter id, or a derived key like `recall:<id>`). */
+  audioKey: string
   className?: string
+  /**
+   * Show a same-sized loading strip while the recording is still being looked
+   * up, instead of rendering nothing. Used right after a capture stops so the
+   * audio row never disappears from its slot.
+   */
+  placeholder?: boolean
 }
 
 // Match the live recording waveform's bar look: ~5px rounded bars, 3px gaps.
@@ -46,7 +53,7 @@ function computePeaks(buffer: AudioBuffer, count: number): number[] {
 }
 
 function drawRoundedBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-  const r = Math.min(w / 2, h / 2)
+  const r = Math.max(0, Math.min(w / 2, h / 2))
   ctx.beginPath()
   if (typeof ctx.roundRect === "function") {
     ctx.roundRect(x, y, w, h, r)
@@ -67,7 +74,7 @@ function drawRoundedBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
  * played bars are solid, the rest are faded. Renders nothing when the encounter
  * has no stored recording (e.g. consultations from before this feature).
  */
-export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
+export function AudioPlayer({ audioKey, className, placeholder = false }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const peaksRef = useRef<number[] | null>(null)
@@ -86,6 +93,10 @@ export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
     const dpr = window.devicePixelRatio || 1
     const w = canvas.clientWidth
     const h = canvas.clientHeight
+    // Hidden or collapsed (e.g. the tab panel is display:none): nothing to
+    // draw, and negative bar widths would make roundRect throw. The
+    // ResizeObserver redraws when the canvas gets its size back.
+    if (w < TARGET_BAR_WIDTH || h <= 0) return
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
       canvas.width = Math.round(w * dpr)
       canvas.height = Math.round(h * dpr)
@@ -137,7 +148,15 @@ export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
     peaksRef.current = null
 
     void (async () => {
-      const blob = await getEncounterAudio(encounterId)
+      // The local copy is written asynchronously while the recording is being
+      // compressed and uploaded, so poll briefly before concluding that this
+      // encounter has no stored audio.
+      let blob: Blob | null = null
+      for (let attempt = 0; attempt < 25 && !cancelled; attempt += 1) {
+        blob = await getEncounterAudio(audioKey)
+        if (blob) break
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
       if (cancelled) return
       if (!blob) {
         setAvailable(false)
@@ -169,7 +188,7 @@ export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
       setUrl(null)
     }
-  }, [encounterId, draw])
+  }, [audioKey, draw])
 
   // Redraw: a smooth playhead while playing, a single frame when idle.
   useEffect(() => {
@@ -233,7 +252,20 @@ export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
     draw()
   }
 
-  if (available !== true) return null
+  if (available !== true) {
+    // While still looking the recording up (available === null), optionally
+    // hold the slot with a same-sized loading strip so the row never vanishes.
+    if (!placeholder || available === false) return null
+    return (
+      <div className={cn("flex items-center gap-3", className)} aria-hidden>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/30 text-primary-foreground">
+          <Play className="h-4 w-4 translate-x-0.5" />
+        </div>
+        <div className="h-9 min-w-0 flex-1 animate-pulse rounded-lg bg-muted" />
+        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">0:00 / 0:00</span>
+      </div>
+    )
+  }
 
   return (
     <div className={cn("flex items-center gap-3", className)}>
@@ -266,7 +298,7 @@ export function AudioPlayer({ encounterId, className }: AudioPlayerProps) {
         {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-0.5" />}
       </button>
 
-      <div className="relative h-9 w-40 shrink-0 sm:w-48">
+      <div className="relative h-9 min-w-0 flex-1">
         <canvas ref={canvasRef} aria-hidden="true" className="block h-full w-full text-primary" />
         <input
           type="range"
