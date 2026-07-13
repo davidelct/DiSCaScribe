@@ -7,7 +7,7 @@ import { getEncounterAudio, saveEncounterAudio } from "@storage/audio-store"
 import { useAudioRecorder, compressAudioFileToMp3 } from "@audio"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
-import { Check, Download, Loader2, Mic, Plus, RotateCcw } from "lucide-react"
+import { Check, Download, Loader2, Mic, Plus, RotateCcw, X } from "lucide-react"
 import { parseDiarizedTranscript, type TranscriptTurn } from "./transcript-view"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
@@ -223,6 +223,19 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
     setSelectedHyp(hyp.id)
     setNewHypName("")
     persist(next, ratings)
+  }
+
+  // Remove a hypothesis along with the cue ratings that referenced it, so no
+  // rating points at a differential that no longer exists.
+  const removeHypothesis = (id: string) => {
+    const nextHypotheses = hypotheses.filter((h) => h.id !== id)
+    const nextRatings = Object.fromEntries(
+      Object.entries(ratings).filter(([, r]) => r.hypothesisId !== id),
+    ) as Record<number, CueRating>
+    setHypotheses(nextHypotheses)
+    setRatings(nextRatings)
+    if (selectedHyp === id) setSelectedHyp(nextHypotheses[0]?.id ?? null)
+    persist(nextHypotheses, nextRatings)
   }
 
   const saveRating = () => {
@@ -545,6 +558,15 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
                       </span>
                     )}
                     <span className="ml-auto font-mono text-sm font-semibold text-foreground">{h.pct}%</span>
+                    <button
+                      type="button"
+                      onClick={() => removeHypothesis(h.id)}
+                      title={`Remove ${h.name} (also removes its cue ratings)`}
+                      className="shrink-0 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      <span className="sr-only">Remove {h.name}</span>
+                    </button>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                     <div className="h-full rounded-full bg-primary" style={{ width: `${h.pct}%` }} />

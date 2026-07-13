@@ -677,7 +677,10 @@ function HomePageContent() {
     }
   }, [handleFinalEvent, handleSegmentEvent, handleStreamError, sessionId])
 
-  // Cleanup EventSource on page unload/refresh
+  // Cleanup EventSource on page unload/refresh. Deliberately NOT on
+  // visibilitychange: the stream carries the pipeline's `final` event, and
+  // closing it while the tab is hidden (e.g. the clinician switches to the
+  // EPR during transcription) dropped the result with no way to re-subscribe.
   useEffect(() => {
     const handleBeforeUnload = () => {
       debugLog('[BeforeUnload] Cleaning up EventSource')
@@ -687,25 +690,11 @@ function HomePageContent() {
       }
     }
 
-    const handleVisibilityChange = () => {
-      // If page becomes hidden and we're not actively recording, cleanup
-      if (document.hidden && view.type !== 'recording') {
-        debugLog('[VisibilityChange] Page hidden, cleaning up EventSource')
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close()
-          eventSourceRef.current = null
-        }
-      }
-    }
-
     window.addEventListener('beforeunload', handleBeforeUnload)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [view.type])
+  }, [])
 
   const startNewSession = useCallback((id: string) => {
     sessionIdRef.current = id
