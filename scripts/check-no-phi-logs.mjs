@@ -12,9 +12,7 @@ const targets = [
   'apps/web/src/lib/auth.ts',
   'apps/web/src/middleware.ts',
   'packages/pipeline/assemble/src/session-store.ts',
-  'packages/pipeline/transcribe/src/providers/whisper-transcriber.ts',
-  'packages/pipeline/transcribe/src/providers/whisper-local-transcriber.ts',
-  'packages/pipeline/transcribe/src/providers/medasr-transcriber.ts',
+  'packages/pipeline/transcribe/src/providers/deepgram-transcriber.ts',
 ]
 
 const bannedPatterns = [

@@ -39,9 +39,9 @@ if (fs.existsSync(envExamplePath)) {
   )
 } else {
   // Create from scratch if example doesn't exist
-  envContent = `# OpenAI API key for transcription (Whisper API)
-# Get your key at: https://platform.openai.com/api-keys
-OPENAI_API_KEY="sk-proj-your-key"
+  envContent = `# Deepgram API key for transcription
+# Get your key at: https://console.deepgram.com/
+DEEPGRAM_API_KEY="your-deepgram-key"
 
 # Anthropic API key for clinical note generation
 # Get your key at: https://console.anthropic.com/
@@ -59,6 +59,6 @@ console.log('✅ Created .env.local with auto-generated storage key')
 console.log('')
 console.log('Next steps:')
 console.log('1. Edit apps/web/.env.local')
-console.log('2. Add your OPENAI_API_KEY')
+console.log('2. Add your DEEPGRAM_API_KEY')
 console.log('3. Add your ANTHROPIC_API_KEY')
 console.log('')

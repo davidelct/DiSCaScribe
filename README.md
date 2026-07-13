@@ -78,7 +78,6 @@ pnpm run setup  # Auto-generates .env.local with a secure storage key
 Edit `apps/web/.env.local` and add:
 
 ```bash
-TRANSCRIPTION_PROVIDER=deepgram
 DEEPGRAM_API_KEY=YOUR_DEEPGRAM_KEY
 DEEPGRAM_MODEL=nova-3
 ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE
@@ -109,8 +108,8 @@ docker compose -f docker-compose.sam.yml up --build
 
 The app deploys to Vercel as a pure cloud web app (no backend to run). See
 [docs/DEPLOY_VERCEL_DEMO.md](./docs/DEPLOY_VERCEL_DEMO.md): set **Root Directory** to
-`apps/web` and provide `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, and
-`TRANSCRIPTION_PROVIDER=deepgram` as environment variables.
+`apps/web` and provide `DEEPGRAM_API_KEY` and `ANTHROPIC_API_KEY` as
+environment variables.
 
 ### Staying Updated
 
@@ -139,7 +138,7 @@ OpenScribe exists to provide a simple, open-source, auditable alternative to clo
 
 - **Local-first storage**: Encounter data is stored in the user's browser by default; there is no server database.
 - **Privacy-conscious**: No analytics or telemetry; external model calls (Deepgram, Anthropic) are explicit and configurable.
-- **Modular**: Components can be swapped or extended (e.g., different LLM providers or transcription services via `TRANSCRIPTION_PROVIDER`).
+- **Modular**: Components can be swapped or extended (e.g., different LLM providers or transcription services).
 
 ## Local MedGemma (Text-Only) Scribe
 
@@ -215,7 +214,7 @@ See [architecture.md](./architecture.md) for complete details.
 **Key Components:**
 - **UI Layer**: React components in `apps/web/` using Next.js App Router
 - **Audio Ingest**: Browser MediaRecorder API → WAV/MP3 blob (in-browser compression)
-- **Transcription**: Deepgram pre-recorded API with diarization (`packages/pipeline/transcribe`); provider is selected by `TRANSCRIPTION_PROVIDER`
+- **Transcription**: Deepgram pre-recorded API with diarization (`packages/pipeline/transcribe`)
 - **LLM**: Anthropic Claude via `packages/llm` (single SOAP-note prompt)
 - **Note Core**: Structured clinical note generation and validation
 - **Storage**: AES-GCM encrypted browser localStorage

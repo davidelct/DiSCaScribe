@@ -3,12 +3,9 @@
 import { useEffect, useState } from "react"
 import { Cpu, Cloud } from "lucide-react"
 
-type TranscriptionProvider = "whisper_local" | "whisper_openai" | "medasr" | "deepgram"
+type TranscriptionProvider = "deepgram"
 
 const TRANSCRIPTION_LABELS: Record<TranscriptionProvider, { label: string; cloud: boolean }> = {
-  whisper_openai: { label: "Whisper (Cloud)", cloud: true },
-  whisper_local: { label: "Whisper (Local)", cloud: false },
-  medasr: { label: "MedASR (Local)", cloud: false },
   deepgram: { label: "Deepgram (Cloud)", cloud: true },
 }
 
@@ -37,8 +34,8 @@ export function ModelIndicator() {
   }, [])
 
   const transcription = provider ? TRANSCRIPTION_LABELS[provider] : null
-  const transcriptionLabel = transcription?.label ?? "Whisper"
-  const TranscriptionIcon = transcription?.cloud ? Cloud : Cpu
+  const transcriptionLabel = transcription?.label ?? "Deepgram (Cloud)"
+  const TranscriptionIcon = transcription?.cloud === false ? Cpu : Cloud
 
   const noteModel = "Claude (Cloud)"
   const NoteIcon = Cloud

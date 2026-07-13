@@ -6,8 +6,7 @@ import {
   type PendingSegment,
   type UploadError,
 } from "../hooks/segment-upload-controller.js"
-import { transcribeWavBuffer } from "../providers/whisper-transcriber.js"
-import { transcribeWavBufferDetailed } from "../providers/deepgram-transcriber.js"
+import { transcribeWavBuffer, transcribeWavBufferDetailed } from "../providers/deepgram-transcriber.js"
 
 function createTestWavBuffer({
   sampleRate,
@@ -187,30 +186,31 @@ test("SegmentUploadController retries transient errors and surfaces final failur
 })
 
 test("transcribeWavBuffer validates API keys and forwards payloads", async () => {
-  const originalKey = process.env.OPENAI_API_KEY
+  const originalKey = process.env.DEEPGRAM_API_KEY
   const originalFetch = globalThis.fetch
 
-  process.env.OPENAI_API_KEY = ""
-  await assert.rejects(() => transcribeWavBuffer(Buffer.from([0, 1, 2]), "sample.wav"), /OPENAI_API_KEY/)
+  process.env.DEEPGRAM_API_KEY = ""
+  await assert.rejects(() => transcribeWavBuffer(Buffer.from([0, 1, 2]), "sample.wav"), /DEEPGRAM_API_KEY/)
 
-  const seen: { url?: string; headers?: HeadersInit; form?: FormData } = {}
-  process.env.OPENAI_API_KEY = "test-key"
+  const seen: { url?: string; headers?: HeadersInit } = {}
+  process.env.DEEPGRAM_API_KEY = "test-key"
   globalThis.fetch = (async (url, init) => {
     seen.url = url as string
     seen.headers = init?.headers
-    seen.form = init?.body as FormData
-    return new Response(JSON.stringify({ text: " hi " }), { status: 200 })
+    return new Response(
+      JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: " hi " }] }] } }),
+      { status: 200 },
+    )
   }) as typeof fetch
 
   try {
     const text = await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav")
     assert.equal(text, "hi")
-    assert.equal(seen.url, "https://api.openai.com/v1/audio/transcriptions")
+    assert(seen.url?.startsWith("https://api.deepgram.com/v1/listen"))
     const authHeader = (seen.headers as Record<string, string>)?.Authorization
-    assert.equal(authHeader, "Bearer test-key")
-    assert(seen.form instanceof FormData)
+    assert.equal(authHeader, "Token test-key")
   } finally {
-    process.env.OPENAI_API_KEY = originalKey
+    process.env.DEEPGRAM_API_KEY = originalKey
     globalThis.fetch = originalFetch
   }
 })
@@ -245,23 +245,25 @@ test("transcribeWavBufferDetailed returns diarized text and the raw response", a
 })
 
 test("transcribeWavBuffer enforces HTTPS for HIPAA compliance", async () => {
-  // Test that the hardcoded URL is HTTPS
-  const originalKey = process.env.OPENAI_API_KEY
+  const originalKey = process.env.DEEPGRAM_API_KEY
   const originalFetch = globalThis.fetch
 
-  process.env.OPENAI_API_KEY = "test-key"
+  process.env.DEEPGRAM_API_KEY = "test-key"
   let capturedUrl: string | undefined
-  
+
   globalThis.fetch = (async (url) => {
     capturedUrl = url as string
-    return new Response(JSON.stringify({ text: "test" }), { status: 200 })
+    return new Response(
+      JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: "test" }] }] } }),
+      { status: 200 },
+    )
   }) as typeof fetch
 
   try {
     await transcribeWavBuffer(Buffer.from([1, 2, 3]), "test.wav")
-    assert(capturedUrl?.startsWith("https://"), "Whisper API URL must use HTTPS")
+    assert(capturedUrl?.startsWith("https://"), "Deepgram API URL must use HTTPS")
   } finally {
-    process.env.OPENAI_API_KEY = originalKey
+    process.env.DEEPGRAM_API_KEY = originalKey
     globalThis.fetch = originalFetch
   }
 })
