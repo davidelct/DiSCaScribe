@@ -66,6 +66,23 @@
 
 /* Light theme only — dark mode intentionally omitted */
 
+/* ── Recording-only capture mode ────────────────────────────────
+   When the study's control arm is active (no note generation), shift the
+   brand accent from clinical blue to green so the mode is unmistakable
+   at a glance. Set via data-capture-mode on <html> (see page.tsx). */
+:root[data-capture-mode="recording_only"] {
+  --primary: oklch(0.52 0.1 160);
+  --accent: oklch(0.93 0.02 160);
+  --accent-foreground: oklch(0.3 0.03 160);
+  --ring: oklch(0.52 0.1 160);
+  --sidebar-primary: oklch(0.52 0.1 160);
+  --sidebar-accent: oklch(0.92 0.02 160);
+  --sidebar-ring: oklch(0.52 0.1 160);
+  --recording: oklch(0.52 0.1 160);
+  --brand-soft: oklch(0.93 0.05 160);
+  --brand-strong: oklch(0.46 0.11 160);
+}
+
 @theme inline {
   --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-display), ui-serif, Georgia, "Times New Roman", serif;

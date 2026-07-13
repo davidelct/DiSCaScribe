@@ -3,9 +3,11 @@ import { Mic } from "lucide-react"
 
 interface IdleViewProps {
   onStartNew: () => void
+  /** True when the capture mode is recording-only (no note generation). */
+  recordingOnly?: boolean
 }
 
-export function IdleView({ onStartNew }: IdleViewProps) {
+export function IdleView({ onStartNew, recordingOnly = false }: IdleViewProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center p-8">
       <div className="animate-fade-up flex flex-col items-center">
@@ -25,7 +27,9 @@ export function IdleView({ onStartNew }: IdleViewProps) {
         </h2>
 
         <p className="max-w-xs text-center text-sm leading-relaxed text-muted-foreground text-balance">
-          Record, transcribe, and generate a structured clinical note — automatically.
+          {recordingOnly
+            ? "Recording only — the consultation is recorded and transcribed; no clinical note is generated."
+            : "Record, transcribe, and generate a structured clinical note — automatically."}
         </p>
       </div>
     </div>

@@ -13,6 +13,8 @@ interface ProcessingViewProps {
   transcriptionErrorMessage?: string
   onRetryTranscription?: () => void
   onRetryNoteGeneration?: () => void
+  /** False for recording-only encounters, which skip note generation. */
+  showNoteGenerationStep?: boolean
 }
 
 export function ProcessingView({
@@ -22,6 +24,7 @@ export function ProcessingView({
   transcriptionErrorMessage,
   onRetryTranscription,
   onRetryNoteGeneration,
+  showNoteGenerationStep = true,
 }: ProcessingViewProps) {
   return (
     <div className="animate-fade-up flex w-full flex-col items-center">
@@ -39,7 +42,9 @@ export function ProcessingView({
           errorMessage={transcriptionErrorMessage}
           onRetry={onRetryTranscription}
         />
-        <ProcessingStep label="Generating clinical note" status={noteGenerationStatus} onRetry={onRetryNoteGeneration} />
+        {showNoteGenerationStep && (
+          <ProcessingStep label="Generating clinical note" status={noteGenerationStatus} onRetry={onRetryNoteGeneration} />
+        )}
       </div>
     </div>
   )

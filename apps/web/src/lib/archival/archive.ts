@@ -141,7 +141,8 @@ export interface ArchiveNoteInput {
   language: string
   recordingDurationSeconds?: number
   transcription: { provider: string; model: string; diarized: boolean }
-  note: { text: string; model: string; format: string }
+  /** Absent for recording-only consultations, which generate no note. */
+  note?: { text: string; model: string; format: string }
   /** Used only to backfill transcript.txt if phase 1 did not write it. */
   transcriptText: string
 }
@@ -155,9 +156,10 @@ export interface ArchiveResult {
 }
 
 /**
- * Write note.md and the metadata.json manifest to the consult's container. The
- * manifest reflects which artifacts actually landed (phase 1 may have partially
- * failed or not run), and transcript.txt is backfilled here if it is missing.
+ * Write note.md (when a note exists — recording-only consultations have none)
+ * and the metadata.json manifest to the consult's container. The manifest
+ * reflects which artifacts actually landed (phase 1 may have partially failed
+ * or not run), and transcript.txt is backfilled here if it is missing.
  */
 export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<ArchiveResult> {
   const { client } = input
@@ -168,13 +170,15 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
 
   const files: Record<string, StorageFileRef> = {}
 
-  files["note.md"] = await client.uploadFile(
-    containerId,
-    "note.md",
-    Buffer.from(input.note.text, "utf8"),
-    "text/markdown; charset=utf-8",
-    existing.get("note.md")?.id,
-  )
+  if (input.note) {
+    files["note.md"] = await client.uploadFile(
+      containerId,
+      "note.md",
+      Buffer.from(input.note.text, "utf8"),
+      "text/markdown; charset=utf-8",
+      existing.get("note.md")?.id,
+    )
+  }
 
   // Backfill the transcript if phase 1 never wrote it (it failed, or this
   // consult came through a path that skipped phase 1).
@@ -202,12 +206,12 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     language: input.language,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
     transcription: input.transcription,
-    note: { model: input.note.model, format: input.note.format },
+    note: input.note ? { model: input.note.model, format: input.note.format } : null,
     files: {
       audio: audioName,
       transcript: present.has("transcript.txt") ? "transcript.txt" : null,
       rawTranscript: present.has("raw_transcript.json") ? "raw_transcript.json" : null,
-      note: "note.md",
+      note: present.has("note.md") ? "note.md" : null,
       metadata: "metadata.json",
     },
   }

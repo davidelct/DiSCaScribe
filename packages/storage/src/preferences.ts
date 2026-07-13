@@ -4,15 +4,19 @@
  */
 
 import { writeAuditEntry } from "./audit-log"
+import type { EncounterMode } from "./types"
 
 export interface UserPreferences {
   preferredInputDeviceId?: string
+  /** Capture mode applied to new encounters (study arm selector). */
+  encounterMode?: EncounterMode
 }
 
 const PREFERENCES_KEY = "openscribe_preferences"
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   preferredInputDeviceId: "",
+  encounterMode: "scribed",
 }
 
 export function getPreferences(): UserPreferences {

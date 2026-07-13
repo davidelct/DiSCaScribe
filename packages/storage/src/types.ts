@@ -1,3 +1,14 @@
+/**
+ * How a consultation is captured:
+ * - "scribed": full pipeline — transcription plus clinical note generation
+ * - "recording_only": transcription and archival only, no note. Used for the
+ *   study's non-scribed control arm, where the consultation must still be
+ *   recorded for stimulated recall but the clinician never sees AI output.
+ * Encounters created before this field existed have no mode; treat absent as
+ * "scribed".
+ */
+export type EncounterMode = "scribed" | "recording_only"
+
 export type EncounterStatus =
   | "idle"
   | "recording"
@@ -22,6 +33,7 @@ export interface Encounter {
    */
   note_text: string
   status: EncounterStatus
+  mode?: EncounterMode
   language: string
   recording_duration?: number
   /** Archival state, when archiving is enabled (see /api/archive/note). */

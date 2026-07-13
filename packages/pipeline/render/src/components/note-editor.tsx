@@ -20,7 +20,9 @@ interface NoteEditorProps {
 type TabType = "note" | "transcript"
 
 export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("note")
+  // Recording-only encounters have no clinical note; only the transcript is shown.
+  const recordingOnly = encounter.mode === "recording_only"
+  const [activeTab, setActiveTab] = useState<TabType>(recordingOnly ? "transcript" : "note")
   const [noteMode, setNoteMode] = useState<"preview" | "edit">("preview")
   const [noteMarkdown, setNoteMarkdown] = useState<string>(encounter.note_text || "")
   const [hasChanges, setHasChanges] = useState(false)
@@ -31,7 +33,8 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
     setNoteMarkdown(encounter.note_text || "")
     setNoteMode("preview")
     setHasChanges(false)
-  }, [encounter.id, encounter.note_text])
+    setActiveTab(encounter.mode === "recording_only" ? "transcript" : "note")
+  }, [encounter.id, encounter.note_text, encounter.mode])
 
   const handleNoteChange = (value: string) => {
     setNoteMarkdown(value)
@@ -101,18 +104,20 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
 
         <div className="mt-4 flex items-center justify-between gap-4 border-b border-border">
           <div className="flex gap-1">
-            <button
-              onClick={() => setActiveTab("note")}
-              className={cn(
-                "px-4 py-2 text-sm font-medium transition-colors",
-                "border-b-2 -mb-px",
-                activeTab === "note"
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              Clinical Note
-            </button>
+            {!recordingOnly && (
+              <button
+                onClick={() => setActiveTab("note")}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium transition-colors",
+                  "border-b-2 -mb-px",
+                  activeTab === "note"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Clinical Note
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("transcript")}
               className={cn(

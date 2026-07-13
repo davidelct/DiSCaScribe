@@ -5,6 +5,7 @@ import { X } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
+import type { EncounterMode } from "@storage/types"
 import { AuditLogViewer } from "./audit-log-viewer"
 
 interface SettingsDialogProps {
@@ -13,6 +14,8 @@ interface SettingsDialogProps {
   audioInputDevices: Array<{ id: string; label: string }>
   preferredInputDeviceId?: string
   onPreferredInputDeviceChange: (value: string) => void
+  encounterMode: EncounterMode
+  onEncounterModeChange: (value: EncounterMode) => void
   micPermissionStatus?: string
   lastMicReadinessMessage?: string
   lastMicReadinessMetrics?: { rms: number; peak: number } | null
@@ -26,6 +29,8 @@ export function SettingsDialog({
   audioInputDevices,
   preferredInputDeviceId,
   onPreferredInputDeviceChange,
+  encounterMode,
+  onEncounterModeChange,
   micPermissionStatus,
   lastMicReadinessMessage,
   lastMicReadinessMetrics,
@@ -148,6 +153,35 @@ export function SettingsDialog({
               </p>
             )}
             {lastFailureCode && <p className="text-xs text-muted-foreground">Last failure code: {lastFailureCode}</p>}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-border" />
+
+          {/* Consultation Capture */}
+          <div className="space-y-3">
+            <Label className="text-base font-medium text-foreground">Consultation Capture</Label>
+            <p className="text-sm text-muted-foreground">
+              Choose whether new consultations generate a clinical note or are recorded and transcribed only
+              (study control arm — no AI note is produced or shown).
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="encounter-mode" className="text-sm font-medium text-foreground">
+                Capture Mode
+              </Label>
+              <select
+                id="encounter-mode"
+                value={encounterMode}
+                onChange={(e) => onEncounterModeChange(e.target.value as EncounterMode)}
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <option value="scribed">Scribed — transcribe and generate clinical note</option>
+                <option value="recording_only">Recording only — transcribe and archive, no note</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Applies immediately to new consultations; in recording-only mode the interface turns green
+              </p>
+            </div>
           </div>
 
           {/* Divider */}

@@ -54,9 +54,13 @@ export async function POST(req: NextRequest) {
 
     const sessionId = body.session_id
     const encounter = body.encounter
+    // `note` is optional: recording-only consultations archive without one.
     const note = body.note
-    if (typeof sessionId !== "string" || typeof note !== "string" || !encounter || typeof encounter !== "object") {
-      return jsonError(400, "validation_error", "Missing session_id, encounter, or note")
+    if (typeof sessionId !== "string" || !encounter || typeof encounter !== "object") {
+      return jsonError(400, "validation_error", "Missing session_id or encounter")
+    }
+    if (note !== undefined && typeof note !== "string") {
+      return jsonError(400, "validation_error", "note must be a string when provided")
     }
     if (!encounter.id) {
       return jsonError(400, "validation_error", "encounter.id is required")
@@ -93,7 +97,7 @@ export async function POST(req: NextRequest) {
         model: resolvedProvider.model,
         diarized: true,
       },
-      note: { text: note, model: NOTE_MODEL, format: "soap-markdown" },
+      note: typeof note === "string" ? { text: note, model: NOTE_MODEL, format: "soap-markdown" } : undefined,
       transcriptText,
     })
 

@@ -8,7 +8,7 @@ import {
   toPipelineError,
   type PipelineError,
 } from "@pipeline-errors"
-import type { Encounter } from "@storage/types"
+import type { Encounter, EncounterMode } from "@storage/types"
 import { useEncounters, EncounterList, IdleView, NewEncounterForm, RecordingView, ProcessingView, ErrorBoundary, PermissionsDialog, SettingsDialog, SettingsBar, ModelIndicator, useHttpsWarning } from "@ui"
 import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
@@ -82,7 +82,8 @@ interface ArchivePayload {
     created_at: string
     recording_duration?: number
   }
-  note: string
+  /** Omitted for recording-only encounters (no note is generated). */
+  note?: string
   transcript: string
 }
 
@@ -126,9 +127,9 @@ function HomePageContent() {
   const [, setProcessingMetrics] = useState<ProcessingMetrics>({})
   const [sessionId, setSessionId] = useState<string | null>(null)
   // Whether the active transcription provider streams live segments during
-  // recording. Final-pass-only providers (e.g. Deepgram) set this false so the
-  // recorder skips segment chunking/uploads. Defaults true (server confirms).
-  const [liveSegmentsEnabled, setLiveSegmentsEnabled] = useState(true)
+  // recording. Deepgram (the only provider) is final-pass only, so this
+  // defaults false; the server confirms via /api/settings/transcription-status.
+  const [liveSegmentsEnabled, setLiveSegmentsEnabled] = useState(false)
   const [workflowError, setWorkflowError] = useState<PipelineError | null>(null)
 
   const currentEncounterIdRef = useRef<string | null>(null)
@@ -143,6 +144,9 @@ function HomePageContent() {
 
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
+  // Capture mode for new consultations (study arm). "recording_only" skips
+  // note generation and flips the UI accent to green as a visible signal.
+  const [captureMode, setCaptureMode] = useState<EncounterMode>("scribed")
   const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
   const [micPermissionStatus, setMicPermissionStatus] = useState("unknown")
   const [lastMicReadiness, setLastMicReadiness] = useState<MicReadinessResult | null>(null)
@@ -151,9 +155,21 @@ function HomePageContent() {
   useEffect(() => {
     const prefs = getPreferences()
     setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
+    setCaptureMode(prefs.encounterMode || "scribed")
 
     // Initialize audit logging system (cleanup old entries, setup periodic cleanup)
     void initializeAuditLog()
+  }, [])
+
+  // Surface the capture mode on <html> so the stylesheet can switch the brand
+  // accent (blue = scribed, green = recording-only) across the whole app.
+  useEffect(() => {
+    document.documentElement.dataset.captureMode = captureMode
+  }, [captureMode])
+
+  const handleEncounterModeChange = useCallback((value: EncounterMode) => {
+    setCaptureMode(value)
+    void setPreferences({ encounterMode: value })
   }, [])
 
   useEffect(() => {
@@ -406,6 +422,69 @@ function HomePageContent() {
     refreshRef.current = refresh
   }, [encounters, refresh])
 
+  // Best-effort: archive the completed consultation to the configured storage
+  // backend (phase 2: note + metadata; `note` is omitted for recording-only
+  // encounters). Runs detached so it never blocks the UI, and an archival
+  // outage or missing config never fails the encounter — it only updates
+  // archive_status.
+  const archiveEncounter = useCallback((encounterId: string, transcript: string, note?: string) => {
+    void (async () => {
+      const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
+      if (!enc?.session_id) return
+      try {
+        const data = await requestArchive(apiBaseUrlRef.current, {
+          session_id: enc.session_id,
+          encounter: {
+            id: enc.id,
+            patient_name: enc.patient_name,
+            patient_id: enc.patient_id,
+            visit_reason: enc.visit_reason,
+            language: enc.language,
+            created_at: enc.created_at,
+            recording_duration: enc.recording_duration,
+          },
+          note,
+          transcript,
+        })
+        if (data.skipped) {
+          await updateEncounterRef.current(encounterId, { archive_status: "skipped" })
+        } else {
+          await updateEncounterRef.current(encounterId, {
+            archive_status: "archived",
+            archive_location: data.folderId,
+            archived_at: new Date().toISOString(),
+          })
+          debugLog(`✅ Consultation archived (container ${data.folderId})`)
+        }
+      } catch (archiveError) {
+        debugError("Archive failed", archiveError)
+        await updateEncounterRef.current(encounterId, { archive_status: "failed" })
+      }
+    })()
+  }, [])
+
+  /**
+   * Recording-only mode: the consultation is transcribed and archived for the
+   * study's stimulated-recall layer, but no clinical note is generated and no
+   * AI output is shown beyond the transcript.
+   */
+  const completeRecordingOnlyEncounter = useCallback(
+    async (encounterId: string, transcript: string) => {
+      debugLog(`Recording-only encounter ${encounterId}: skipping note generation`)
+      await updateEncounterRef.current(encounterId, { status: "completed" })
+      await refreshRef.current()
+      setWorkflowError(null)
+      setProcessingMetrics((prev) => ({
+        ...prev,
+        transcriptionEndedAt: prev.transcriptionEndedAt ?? Date.now(),
+        processingEndedAt: Date.now(),
+      }))
+      setView({ type: "viewing", encounterId })
+      archiveEncounter(encounterId, transcript)
+    },
+    [archiveEncounter],
+  )
+
   const processEncounterForNoteGeneration = useCallback(
     async (encounterId: string, transcript: string) => {
       const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
@@ -451,43 +530,7 @@ function HomePageContent() {
         debugLog("=".repeat(80) + "\n")
         setView({ type: "viewing", encounterId })
 
-        // Best-effort: archive the completed consultation (audio + transcript +
-        // raw transcript + note + metadata) to the configured storage backend.
-        // Runs detached so it never blocks the UI, and an archival outage or
-        // missing config never fails the encounter — it only updates archive_status.
-        void (async () => {
-          const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
-          if (!enc?.session_id) return
-          try {
-            const data = await requestArchive(apiBaseUrlRef.current, {
-              session_id: enc.session_id,
-              encounter: {
-                id: enc.id,
-                patient_name: enc.patient_name,
-                patient_id: enc.patient_id,
-                visit_reason: enc.visit_reason,
-                language: enc.language,
-                created_at: enc.created_at,
-                recording_duration: enc.recording_duration,
-              },
-              note,
-              transcript,
-            })
-            if (data.skipped) {
-              await updateEncounterRef.current(encounterId, { archive_status: "skipped" })
-            } else {
-              await updateEncounterRef.current(encounterId, {
-                archive_status: "archived",
-                archive_location: data.folderId,
-                archived_at: new Date().toISOString(),
-              })
-              debugLog(`✅ Consultation archived (container ${data.folderId})`)
-            }
-          } catch (archiveError) {
-            debugError("Archive failed", archiveError)
-            await updateEncounterRef.current(encounterId, { archive_status: "failed" })
-          }
-        })()
+        archiveEncounter(encounterId, transcript, note)
       } catch (err) {
         debugError("❌ Note generation failed:", err)
         setWorkflowError(
@@ -507,7 +550,7 @@ function HomePageContent() {
         await refreshRef.current()
       }
     },
-    [], // No dependencies - uses refs instead
+    [archiveEncounter],
   )
 
   const handleFinalEvent = useCallback(
@@ -534,7 +577,12 @@ function HomePageContent() {
           void (async () => {
             await updateEncounterRef.current(encounterId, { transcript_text: transcript })
             await refreshRef.current()
-            await processEncounterForNoteGeneration(encounterId, transcript)
+            const mode = encountersRef.current.find((e: Encounter) => e.id === encounterId)?.mode
+            if (mode === "recording_only") {
+              await completeRecordingOnlyEncounter(encounterId, transcript)
+            } else {
+              await processEncounterForNoteGeneration(encounterId, transcript)
+            }
           })()
         }
         cleanupSession()
@@ -542,7 +590,7 @@ function HomePageContent() {
         debugError("Failed to parse final transcript event", error)
       }
     },
-    [cleanupSession, isBlankTranscriptText, processEncounterForNoteGeneration], // Minimal stable dependencies
+    [cleanupSession, completeRecordingOnlyEncounter, isBlankTranscriptText, processEncounterForNoteGeneration],
   )
 
   const handleStreamError = useCallback((event: MessageEvent | Event) => {
@@ -687,6 +735,9 @@ function HomePageContent() {
         status: "recording",
         transcript_text: "",
         session_id: session,
+        // Snapshot the settings-level capture mode so the encounter keeps its
+        // study arm even if the setting changes later.
+        mode: captureMode,
       })
 
       currentEncounterIdRef.current = encounter.id
@@ -912,6 +963,7 @@ function HomePageContent() {
         status: "processing",
         transcript_text: "",
         session_id: session,
+        mode: captureMode,
       })
       currentEncounterIdRef.current = encounter.id
       setView({ type: "processing", encounterId: encounter.id })
@@ -1045,7 +1097,7 @@ function HomePageContent() {
   const renderMainContent = () => {
     switch (view.type) {
       case "idle":
-        return <IdleView onStartNew={handleStartNew} />
+        return <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
       case "new-form":
         return (
           <div className="flex h-full items-center justify-center p-8">
@@ -1084,6 +1136,7 @@ function HomePageContent() {
                 transcriptionErrorMessage={transcriptionErrorMessage}
                 onRetryTranscription={handleRetryTranscription}
                 onRetryNoteGeneration={handleRetryNoteGeneration}
+                showNoteGenerationStep={currentEncounter?.mode !== "recording_only"}
               />
             </div>
           </div>
@@ -1093,10 +1146,10 @@ function HomePageContent() {
         return selectedEncounter ? (
           <NoteEditor encounter={selectedEncounter} onSave={handleSaveNote} />
         ) : (
-          <IdleView onStartNew={handleStartNew} />
+          <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
         )
       default:
-        return <IdleView onStartNew={handleStartNew} />
+        return <IdleView onStartNew={handleStartNew} recordingOnly={captureMode === "recording_only"} />
     }
   }
 
@@ -1111,6 +1164,8 @@ function HomePageContent() {
         audioInputDevices={audioInputDevices}
         preferredInputDeviceId={preferredInputDeviceId}
         onPreferredInputDeviceChange={handlePreferredInputDeviceChange}
+        encounterMode={captureMode}
+        onEncounterModeChange={handleEncounterModeChange}
         micPermissionStatus={micPermissionStatus}
         lastMicReadinessMessage={lastMicReadiness?.userMessage || (lastMicReadiness?.success ? "Ready" : "")}
         lastMicReadinessMetrics={lastMicReadiness?.metrics || null}
