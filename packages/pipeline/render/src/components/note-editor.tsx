@@ -11,6 +11,7 @@ import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
 import { AudioPlayer } from "./audio-player"
+import { parseNoteSections, markdownToPlainText } from "../note-sections"
 
 interface NoteEditorProps {
   encounter: Encounter
@@ -18,6 +19,66 @@ interface NoteEditorProps {
 }
 
 type TabType = "note" | "transcript"
+
+/**
+ * One SOAP section with its own copy button. The demo EPR splits the note
+ * into one plain-text box per section, so the button copies the section body
+ * as plain text (markdown markers stripped) ready to paste.
+ */
+function CopyableSection({ title, body }: { title: string; body: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(markdownToPlainText(body))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <section>
+      <div className="mt-8 mb-3 flex items-end justify-between gap-3 border-b border-border pb-2">
+        <h2 className="font-display text-xl font-medium tracking-tight text-foreground">{title}</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCopy}
+          disabled={!body.trim()}
+          title={`Copy ${title} as plain text`}
+          className="h-7 shrink-0 rounded-full px-2.5 text-muted-foreground hover:text-foreground"
+        >
+          {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
+          <span className="text-xs">{copied ? "Copied" : "Copy"}</span>
+        </Button>
+      </div>
+      {body.trim() ? (
+        <MarkdownNote source={body} className="[&>*:first-child]:mt-0" />
+      ) : (
+        <p className="my-3 text-sm italic text-muted-foreground">Empty</p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Renders the note with a copy button per level-2 (SOAP) section. Falls back
+ * to plain whole-note rendering when the note has no sections.
+ */
+function SectionedNote({ source }: { source: string }) {
+  const { preamble, sections } = parseNoteSections(source)
+
+  if (sections.length === 0) {
+    return <MarkdownNote source={source} />
+  }
+
+  return (
+    <div>
+      {preamble && <MarkdownNote source={preamble} className="[&>*:first-child]:mt-0" />}
+      {sections.map((section) => (
+        <CopyableSection key={section.title} title={section.title} body={section.body} />
+      ))}
+    </div>
+  )
+}
 
 export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
   // Recording-only encounters have no clinical note; only the transcript is shown.
@@ -192,7 +253,7 @@ export function NoteEditor({ encounter, onSave }: NoteEditorProps) {
           {activeTab === "note" ? (
             noteMode === "preview" ? (
               <div className="min-h-[640px] rounded-2xl border border-border bg-card p-8 shadow-soft sm:p-10">
-                <MarkdownNote source={noteMarkdown} />
+                <SectionedNote source={noteMarkdown} />
               </div>
             ) : (
               <Textarea
