@@ -6,8 +6,10 @@ export interface LLMRequest {
   model?: string
   apiKey?: string
   /**
-   * @deprecated JSON schema tool calling is no longer used.
-   * The system now generates markdown directly.
+   * When provided, the response is constrained to this JSON schema via the
+   * API's structured outputs (output_config.format), so the returned string is
+   * guaranteed to be valid JSON matching the schema. The schema must set
+   * additionalProperties: false and list every property in required.
    */
   jsonSchema?: {
     name: string
@@ -87,9 +89,14 @@ export async function runLLMRequest({ system, prompt, model, apiKey, jsonSchema 
     ],
   }
 
-  // JSON schema is deprecated - we now generate markdown directly
+  // Structured outputs: constrain the response to the caller's JSON schema.
   if (jsonSchema) {
-    console.warn("⚠️  jsonSchema parameter is deprecated and will be ignored. The system now generates markdown directly.")
+    requestParams.output_config = {
+      format: {
+        type: "json_schema",
+        schema: jsonSchema.schema,
+      },
+    }
   }
 
   const timeoutMs = Number(process.env.ANTHROPIC_TIMEOUT_MS || 45000)

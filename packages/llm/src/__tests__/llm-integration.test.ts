@@ -62,7 +62,7 @@ test("runLLMRequest returns string response for simple prompts", async () => {
   const response = await runLLMRequest({
     system: "You are a helpful assistant. Respond with exactly one word.",
     prompt: "Say 'hello'",
-    model: "claude-3-haiku-20240307", // Use cheaper model for tests
+    model: "claude-haiku-4-5", // Use cheaper model for tests
   })
 
   assert.equal(typeof response, "string", "Response should be a string")
@@ -89,7 +89,7 @@ test("runLLMRequest with jsonSchema returns valid JSON", async () => {
   const response = await runLLMRequest({
     system: "You are a data generator. Generate test data following the schema.",
     prompt: "Generate a person with name 'Alice' and age 30",
-    model: "claude-3-haiku-20240307",
+    model: "claude-haiku-4-5",
     jsonSchema: {
       name: "PersonData",
       schema,
@@ -129,7 +129,7 @@ test("runLLMRequest with jsonSchema enforces schema structure", async () => {
   const response = await runLLMRequest({
     system: "Generate structured data.",
     prompt: "Generate data with three fields: field_a, field_b, field_c",
-    model: "claude-3-haiku-20240307",
+    model: "claude-haiku-4-5",
     jsonSchema: {
       name: "TestData",
       schema,
@@ -182,7 +182,7 @@ test("runLLMRequest enforces HTTPS for HIPAA compliance", async () => {
   const response = await runLLMRequest({
     system: "You are a test assistant.",
     prompt: "Say 'test'",
-    model: "claude-3-haiku-20240307",
+    model: "claude-haiku-4-5",
   })
 
   // If we get a response, it means HTTPS validation passed

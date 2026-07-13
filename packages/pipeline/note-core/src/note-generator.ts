@@ -14,6 +14,49 @@ export interface ClinicalNoteRequest {
   apiKey?: string
 }
 
+interface SoapNoteSections {
+  subjective: string
+  objective: string
+  assessment: string
+  plan: string
+}
+
+/**
+ * Assemble the canonical SOAP markdown from the structured sections. Section
+ * bodies carry no headings (the schema forbids them), so the note's shape —
+ * one `##` per section, no document title — is deterministic and safe for
+ * downstream parsing (e.g. the per-section copy UI).
+ */
+function assembleSoapMarkdown(sections: SoapNoteSections): string {
+  const section = (title: string, body: string) => {
+    const trimmed = body.trim()
+    return trimmed ? `## ${title}\n\n${trimmed}` : `## ${title}`
+  }
+  return [
+    section("Subjective", sections.subjective),
+    section("Objective", sections.objective),
+    section("Assessment", sections.assessment),
+    section("Plan", sections.plan),
+  ].join("\n\n") + "\n"
+}
+
+function parseSoapNoteJson(text: string): SoapNoteSections | null {
+  try {
+    const parsed = JSON.parse(text) as Partial<SoapNoteSections>
+    if (
+      typeof parsed?.subjective === "string" &&
+      typeof parsed?.objective === "string" &&
+      typeof parsed?.assessment === "string" &&
+      typeof parsed?.plan === "string"
+    ) {
+      return parsed as SoapNoteSections
+    }
+  } catch {
+    // fall through — treated as a plain-markdown response below
+  }
+  return null
+}
+
 export async function createClinicalNoteText(params: ClinicalNoteRequest): Promise<string> {
   const { transcript, patient_name, visit_reason, apiKey } = params
 
@@ -59,14 +102,19 @@ export async function createClinicalNoteText(params: ClinicalNoteRequest): Promi
       prompt: userPrompt,
       model: prompts.clinicalNote.currentVersion.MODEL_OPTIMIZED_FOR,
       apiKey,
-      // No JSON schema - direct text generation
+      // Structured outputs: the API guarantees JSON matching this schema,
+      // giving a schema-enforced SOAP section split.
+      jsonSchema: prompts.clinicalNote.currentVersion.SOAP_NOTE_SCHEMA,
     })
 
-    // Extract markdown from response (handles code fences)
-    const cleanedMarkdown = extractMarkdownFromResponse(text)
-    
-    // Normalize section headings to standard format
-    const normalizedMarkdown = normalizeMarkdownSections(cleanedMarkdown)
+    // Assemble canonical markdown from the structured sections. The defensive
+    // markdown path covers the (schema-guaranteed not to happen) case of a
+    // non-JSON response, and keeps this function safe if the prompt version
+    // is ever rolled back to plain-markdown generation.
+    const sections = parseSoapNoteJson(text)
+    const normalizedMarkdown = sections
+      ? assembleSoapMarkdown(sections)
+      : normalizeMarkdownSections(extractMarkdownFromResponse(text))
 
     debugLog("=".repeat(80))
     debugLog("FINAL CLINICAL NOTE:")

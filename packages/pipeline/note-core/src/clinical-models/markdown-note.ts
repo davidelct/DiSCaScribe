@@ -84,9 +84,7 @@ export function validateMarkdownNote(markdown: string): {
  * Create an empty markdown note template
  */
 export function createEmptyMarkdownNote(): string {
-  return `# SOAP Note
-
-## Subjective
+  return `## Subjective
 
 
 ## Objective
