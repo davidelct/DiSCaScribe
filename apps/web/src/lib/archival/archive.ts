@@ -8,7 +8,8 @@
  *     audio.wav            the consult recording (omitted if unavailable)
  *     transcript.txt       Deepgram transcript, diarized (Speaker N: …)
  *     raw_transcript.json  Deepgram's full response (word timings, confidence)
- *     note.md              Claude-generated SOAP note
+ *     note_v0.md           Claude-generated SOAP note (v0 = as generated)
+ *     note_v<N>.md         each saved user edit lands as the next version
  *     metadata.json        structured sidecar tying it all together
  *
  * The two phases exist because the artifacts become available in different
@@ -196,8 +197,11 @@ export interface ArchiveNoteInput {
   language: string
   recordingDurationSeconds?: number
   transcription: { provider: string; model: string; diarized: boolean }
-  /** Absent for recording-only consultations, which generate no note. */
-  note?: { text: string; model: string; format: string }
+  /**
+   * Absent for recording-only consultations, which generate no note.
+   * `version` 0 is the generated note; each saved user edit increments it.
+   */
+  note?: { text: string; model: string; format: string; version: number }
   /** Used only to backfill transcript.txt if phase 1 did not write it. */
   transcriptText: string
 }
@@ -210,9 +214,21 @@ export interface ArchiveResult {
   artifacts: string[]
 }
 
+/** note_v<N>.md — every note version archived for this consultation. */
+const NOTE_VERSION_PATTERN = /^note_v(\d+)\.md$/
+
+/** Note artifacts present in the container, newest version last. */
+function noteVersionFiles(present: Iterable<string>): string[] {
+  return [...present]
+    .filter((name) => NOTE_VERSION_PATTERN.test(name))
+    .sort((a, b) => Number(NOTE_VERSION_PATTERN.exec(a)![1]) - Number(NOTE_VERSION_PATTERN.exec(b)![1]))
+}
+
 /**
- * Write note.md (when a note exists — recording-only consultations have none)
- * and the metadata.json manifest to the consult's container. The manifest
+ * Write the note (when one exists — recording-only consultations have none)
+ * and the metadata.json manifest to the consult's container. Each note version
+ * lands as its own immutable note_v<N>.md (v0 = generated, v1+ = user edits);
+ * the manifest points `files.note` at the newest version. The manifest
  * reflects which artifacts actually landed (phase 1 may have partially failed
  * or not run), and transcript.txt is backfilled here if it is missing.
  */
@@ -226,12 +242,13 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
   const files: Record<string, StorageFileRef> = {}
 
   if (input.note) {
-    files["note.md"] = await client.uploadFile(
+    const noteName = `note_v${input.note.version}.md`
+    files[noteName] = await client.uploadFile(
       containerId,
-      "note.md",
+      noteName,
       Buffer.from(input.note.text, "utf8"),
       "text/markdown; charset=utf-8",
-      existing.get("note.md")?.id,
+      existing.get(noteName)?.id,
     )
   }
 
@@ -249,6 +266,8 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
   // Truth comes from the container, not from what we expected to upload.
   const present = new Set<string>([...existing.keys(), ...Object.keys(files)])
   const audioName = [...present].find((name) => /^audio\./.test(name)) ?? null
+  const noteVersions = noteVersionFiles(present)
+  const latestNote = noteVersions.at(-1) ?? null
 
   const metadata = {
     schemaVersion: METADATA_SCHEMA_VERSION,
@@ -261,12 +280,15 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     language: input.language,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
     transcription: input.transcription,
-    note: input.note ? { model: input.note.model, format: input.note.format } : null,
+    note: input.note
+      ? { model: input.note.model, format: input.note.format, version: input.note.version }
+      : null,
     files: {
       audio: audioName,
       transcript: present.has("transcript.txt") ? "transcript.txt" : null,
       rawTranscript: present.has("raw_transcript.json") ? "raw_transcript.json" : null,
-      note: present.has("note.md") ? "note.md" : null,
+      note: latestNote,
+      noteVersions,
       metadata: "metadata.json",
     },
   }

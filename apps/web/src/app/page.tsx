@@ -83,6 +83,8 @@ interface ArchivePayload {
   }
   /** Omitted for recording-only encounters (no note is generated). */
   note?: string
+  /** Version of `note`: 0 = as generated, 1+ = saved user edits. */
+  note_version?: number
   transcript: string
 }
 
@@ -425,44 +427,51 @@ function HomePageContent() {
 
   // Best-effort: archive the completed consultation to the configured storage
   // backend (phase 2: note + metadata; `note` is omitted for recording-only
-  // encounters). Runs detached so it never blocks the UI, and an archival
-  // outage or missing config never fails the encounter — it only updates
-  // archive_status.
-  const archiveEncounter = useCallback((encounterId: string, transcript: string, note?: string) => {
-    void (async () => {
-      const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
-      if (!enc?.session_id) return
-      try {
-        const data = await requestArchive(apiBaseUrlRef.current, {
-          session_id: enc.session_id,
-          encounter: {
-            id: enc.id,
-            patient_name: enc.patient_name,
-            patient_id: enc.patient_id,
-            visit_reason: enc.visit_reason,
-            language: enc.language,
-            created_at: enc.created_at,
-            recording_duration: enc.recording_duration,
-          },
-          note,
-          transcript,
-        })
-        if (data.skipped) {
-          await updateEncounterRef.current(encounterId, { archive_status: "skipped" })
-        } else {
-          await updateEncounterRef.current(encounterId, {
-            archive_status: "archived",
-            archive_location: data.folderId,
-            archived_at: new Date().toISOString(),
+  // encounters). Each note version lands as its own note_v<N>.md. Runs
+  // detached so it never blocks the UI, and an archival outage or missing
+  // config never fails the encounter — it only updates the archive statuses.
+  const archiveEncounter = useCallback(
+    (encounterId: string, transcript: string, note?: string, noteVersion?: number) => {
+      void (async () => {
+        const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
+        if (!enc?.session_id) return
+        const noteStatus = (status: Encounter["note_archive_status"]) =>
+          note !== undefined ? { note_archive_status: status } : {}
+        try {
+          const data = await requestArchive(apiBaseUrlRef.current, {
+            session_id: enc.session_id,
+            encounter: {
+              id: enc.id,
+              patient_name: enc.patient_name,
+              patient_id: enc.patient_id,
+              visit_reason: enc.visit_reason,
+              language: enc.language,
+              created_at: enc.created_at,
+              recording_duration: enc.recording_duration,
+            },
+            note,
+            note_version: note !== undefined ? (noteVersion ?? 0) : undefined,
+            transcript,
           })
-          debugLog(`✅ Consultation archived (container ${data.folderId})`)
+          if (data.skipped) {
+            await updateEncounterRef.current(encounterId, { archive_status: "skipped", ...noteStatus("skipped") })
+          } else {
+            await updateEncounterRef.current(encounterId, {
+              archive_status: "archived",
+              archive_location: data.folderId,
+              archived_at: new Date().toISOString(),
+              ...noteStatus("archived"),
+            })
+            debugLog(`✅ Consultation archived (container ${data.folderId})`)
+          }
+        } catch (archiveError) {
+          debugError("Archive failed", archiveError)
+          await updateEncounterRef.current(encounterId, { archive_status: "failed", ...noteStatus("failed") })
         }
-      } catch (archiveError) {
-        debugError("Archive failed", archiveError)
-        await updateEncounterRef.current(encounterId, { archive_status: "failed" })
-      }
-    })()
-  }, [])
+      })()
+    },
+    [],
+  )
 
   /**
    * Recording-only mode: the consultation is transcribed and archived for the
@@ -515,6 +524,8 @@ function HomePageContent() {
         })
         await updateEncounterRef.current(encounterId, {
           note_text: note,
+          note_version: 0,
+          note_archive_status: "pending",
           status: "completed",
         })
         await refreshRef.current()
@@ -531,7 +542,7 @@ function HomePageContent() {
         debugLog("=".repeat(80) + "\n")
         setView({ type: "viewing", encounterId })
 
-        archiveEncounter(encounterId, transcript, note)
+        archiveEncounter(encounterId, transcript, note, 0)
       } catch (err) {
         debugError("❌ Note generation failed:", err)
         setWorkflowError(
@@ -1080,9 +1091,19 @@ function HomePageContent() {
     setView({ type: "viewing", encounterId: encounter.id })
   }
 
+  // Saving an edited note creates the next version: v0 is the generated note,
+  // each save lands as note_v<N>.md in the consultation's archive container.
   const handleSaveNote = async (noteText: string) => {
     if (!("encounterId" in view)) return
-    await updateEncounter(view.encounterId, { note_text: noteText })
+    const enc = encounters.find((e: Encounter) => e.id === view.encounterId)
+    if (!enc) return
+    const nextVersion = (enc.note_version ?? 0) + 1
+    await updateEncounter(view.encounterId, {
+      note_text: noteText,
+      note_version: nextVersion,
+      note_archive_status: "pending",
+    })
+    archiveEncounter(view.encounterId, enc.transcript_text, noteText, nextVersion)
   }
 
   const handleDeleteEncounter = async (encounterId: string) => {

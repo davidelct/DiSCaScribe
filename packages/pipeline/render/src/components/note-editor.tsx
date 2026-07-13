@@ -141,7 +141,6 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
   const [noteMarkdown, setNoteMarkdown] = useState<string>(encounter.note_text || "")
   const [hasChanges, setHasChanges] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [saved, setSaved] = useState(false)
   const prevNoteRef = useRef<string>(encounter.note_text || "")
 
   // Reset the view when switching encounters.
@@ -172,17 +171,24 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
   const noteEnabled = hasNote
   const recallEnabled = hasTranscript && (recordingOnly || hasNote)
 
+  // Note versioning: v0 is the generated note, each saved edit increments it.
+  // Encounters archived before per-note status existed fall back to the
+  // encounter-level archive state, so an archived v0 still shows its tick.
+  const noteVersion = encounter.note_version ?? 0
+  const noteArchive = encounter.note_archive_status ?? encounter.archive_status
+
   const handleNoteChange = (value: string) => {
     setNoteMarkdown(value)
     setHasChanges(true)
-    setSaved(false)
   }
 
+  // Done editing: persist the edit as the next note version (the parent
+  // archives it) and return to the formatted view. Leaving the text untouched
+  // creates no new version.
   const handleSave = () => {
-    onSave(noteMarkdown)
+    if (hasChanges) onSave(noteMarkdown)
     setHasChanges(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    setNoteMode("preview")
   }
 
   const handleCopy = async () => {
@@ -281,23 +287,50 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
 
           <div className="flex items-center gap-1 pb-2">
             {activeTab === "note" && hasNote && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setNoteMode((m) => (m === "edit" ? "preview" : "edit"))}
-                aria-pressed={noteMode === "edit"}
-                title={noteMode === "edit" ? "Switch to formatted view" : "Edit raw markdown"}
-                className={cn(
-                  "mr-1 h-8 rounded-full px-3",
-                  noteMode === "edit"
-                    ? "bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong hover:text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+              <span
+                title={
+                  noteArchive === "pending"
+                    ? "Saving this version to the archive…"
+                    : noteArchive === "archived"
+                      ? "This version is saved to the archive"
+                      : noteArchive === "failed"
+                        ? "Archiving this version failed"
+                        : noteArchive === "skipped"
+                          ? "Archiving not configured — stored locally only"
+                          : undefined
+                }
+                className="mr-1 flex h-8 items-center gap-1.5 rounded-full border border-border px-2.5 font-mono text-xs text-muted-foreground"
               >
-                <Pencil className="mr-1.5 h-4 w-4" />
-                <span className="text-xs">Edit</span>
-              </Button>
+                v{noteVersion}
+                {noteArchive === "pending" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                {noteArchive === "archived" && <Check className="h-3 w-3 text-success" />}
+                {noteArchive === "failed" && <X className="h-3 w-3 text-destructive" />}
+              </span>
             )}
+            {activeTab === "note" &&
+              hasNote &&
+              (noteMode === "preview" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setNoteMode("edit")}
+                  title="Edit the note"
+                  className="mr-1 h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                  <span className="text-xs">Edit</span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleSave}
+                  title="Save your edits as the next note version"
+                  className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
+                >
+                  <Save className="mr-1.5 h-4 w-4" />
+                  <span className="text-xs">Save</span>
+                </Button>
+              ))}
             {showCopyExport && (
               <>
                 <Button
@@ -319,20 +352,6 @@ export function NoteEditor({ encounter, onSave, live }: NoteEditorProps) {
                   <span className="text-xs">Export</span>
                 </Button>
               </>
-            )}
-            {activeTab === "note" && hasNote && (
-              <Button
-                size="sm"
-                onClick={handleSave}
-                disabled={!hasChanges}
-                className={cn(
-                  "ml-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong",
-                  saved && "bg-success hover:bg-success",
-                )}
-              >
-                {saved ? <Check className="h-4 w-4 mr-1.5" /> : <Save className="h-4 w-4 mr-1.5" />}
-                <span className="text-xs">{saved ? "Saved" : "Save"}</span>
-              </Button>
             )}
           </div>
         </div>

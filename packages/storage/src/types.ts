@@ -32,6 +32,13 @@ export interface Encounter {
    * This is the primary storage format for notes
    */
   note_text: string
+  /**
+   * Version of note_text. The generated note is v0; each user edit that is
+   * saved increments it. Every version is archived as its own note_v<N>.md.
+   */
+  note_version?: number
+  /** Archive state of the current note version's copy in the storage backend. */
+  note_archive_status?: NoteArchiveStatus
   status: EncounterStatus
   mode?: EncounterMode
   language: string
@@ -51,6 +58,9 @@ export interface Encounter {
  * - skipped: archiving is not configured, so nothing was uploaded
  */
 export type ArchiveStatus = "archived" | "failed" | "skipped"
+
+/** ArchiveStatus plus "pending" for an upload that is still in flight. */
+export type NoteArchiveStatus = ArchiveStatus | "pending"
 
 /**
  * Audit event types for HIPAA compliance tracking

@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       session_id?: unknown
       encounter?: EncounterPayload
       note?: unknown
+      note_version?: unknown
       transcript?: unknown
     }
     try {
@@ -62,6 +63,10 @@ export async function POST(req: NextRequest) {
     if (note !== undefined && typeof note !== "string") {
       return jsonError(400, "validation_error", "note must be a string when provided")
     }
+    const noteVersion =
+      typeof body.note_version === "number" && Number.isInteger(body.note_version) && body.note_version >= 0
+        ? body.note_version
+        : 0
     if (!encounter.id) {
       return jsonError(400, "validation_error", "encounter.id is required")
     }
@@ -97,7 +102,10 @@ export async function POST(req: NextRequest) {
         model: resolvedProvider.model,
         diarized: true,
       },
-      note: typeof note === "string" ? { text: note, model: NOTE_MODEL, format: "soap-markdown" } : undefined,
+      note:
+        typeof note === "string"
+          ? { text: note, model: NOTE_MODEL, format: "soap-markdown", version: noteVersion }
+          : undefined,
       transcriptText,
     })
 
