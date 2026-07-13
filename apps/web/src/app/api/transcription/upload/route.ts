@@ -78,11 +78,12 @@ export async function POST(req: NextRequest) {
         return jsonError(422, "blank_audio", message, true)
       }
 
-      transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
-
       // Phase 1 of archival: upload the uploaded audio + raw Deepgram JSON +
       // transcript from this request (which holds the bytes), so archival stays
       // correct on serverless. Best-effort — never fails the transcription.
+      // Must complete BEFORE the final transcript is pushed to the client: the
+      // client triggers phase 2 (metadata manifest) on that event, and the
+      // manifest lists whichever artifacts are already in the container.
       if (encounterId) {
         const archival = getArchivalConfig()
         if (archival.enabled) {
@@ -104,6 +105,8 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+
+      transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
 
       await writeAuditEntry({
         event_type: "transcription.completed",
