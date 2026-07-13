@@ -41,10 +41,38 @@ interface CueRating {
   updatedPct: number
 }
 
+/** One utterance click made while the recall interview was being recorded. */
+interface UtteranceClick {
+  /** Index into the utterance list. */
+  utterance: number
+  /** Position in the recall recording at click time, seconds (pauses excluded). */
+  audioOffsetSeconds: number
+  /** Wall-clock time of the click. */
+  at: string
+}
+
+/**
+ * Timing of the recall recording, for segmenting the audio per utterance:
+ * the stretch between two consecutive clicks is the clinician talking about
+ * the first click's utterance.
+ */
+interface RecallTimeline {
+  /** Wall-clock time the recording started. */
+  startedAt: string
+  /** Wall-clock time the recording stopped. */
+  stoppedAt?: string
+  /** Recorded length in seconds (pauses excluded). */
+  durationSeconds?: number
+  /** Every utterance click while recording, in order. */
+  utteranceClicks: UtteranceClick[]
+}
+
 interface RecallSession {
   hypotheses: Hypothesis[]
   /** Keyed by utterance index. */
   ratings: Record<number, CueRating>
+  /** Timing of the recall recording (replaced on re-record). */
+  timeline?: RecallTimeline
   /** Set once the recall recording + session data have been archived. */
   recallArchivedAt?: string
 }
@@ -105,6 +133,18 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
   const utteranceRefs = useRef<Array<HTMLButtonElement | null>>([])
   const recallBlobRef = useRef<Blob | null>(null)
 
+  // Recall-recording timeline. The offset clock counts recorded time only:
+  // accumulated ms up to the last pause, plus the running stretch since the
+  // last start/resume when not paused.
+  const timelineRef = useRef<RecallTimeline | null>(null)
+  const recordedMsRef = useRef(0)
+  const runningSinceRef = useRef<number | null>(null)
+
+  const recordedOffsetSeconds = () => {
+    const running = runningSinceRef.current === null ? 0 : performance.now() - runningSinceRef.current
+    return Math.round(recordedMsRef.current + running) / 1000
+  }
+
   const recorder = useAudioRecorder({ emitSegments: false })
   const recallKey = recallAudioKey(encounter.id)
 
@@ -118,6 +158,9 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
     setRecallStatus("idle")
     setHasRecallAudio(false)
     recallBlobRef.current = null
+    timelineRef.current = null
+    recordedMsRef.current = 0
+    runningSinceRef.current = null
     void getEncounterAudio(recallAudioKey(encounter.id)).then((blob) => {
       if (!cancelled) setHasRecallAudio(Boolean(blob))
     })
@@ -127,6 +170,7 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
       setRatings(saved?.ratings ?? {})
       setSelectedHyp(saved?.hypotheses?.[0]?.id ?? null)
       archivedAtRef.current = saved?.recallArchivedAt
+      timelineRef.current = saved?.timeline ?? null
       if (saved?.recallArchivedAt) setRecallStatus("archived")
       setLoaded(true)
     })
@@ -142,6 +186,7 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
       void saveSecureItem<RecallSession>(storageKey(encounter.id), {
         hypotheses: nextHypotheses,
         ratings: nextRatings,
+        timeline: timelineRef.current ?? undefined,
         recallArchivedAt: archivedAtRef.current,
       })
     },
@@ -154,6 +199,15 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
   }, [hypotheses])
 
   const selectUtterance = (index: number) => {
+    // While the recall interview is being recorded, log the click against the
+    // recording's timeline so the audio can later be segmented per utterance.
+    if (recallStatus === "recording" && timelineRef.current) {
+      timelineRef.current.utteranceClicks.push({
+        utterance: index,
+        audioOffsetSeconds: recordedOffsetSeconds(),
+        at: new Date().toISOString(),
+      })
+    }
     setActive(index)
     setPendingValue(ratings[index]?.value ?? null)
     setPendingPct(null)
@@ -197,8 +251,9 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
     setActive(null)
   }
 
-  const sessionPayload = useCallback(
-    () => ({
+  const sessionPayload = useCallback(() => {
+    const timeline = timelineRef.current
+    return {
       encounter_id: encounter.id,
       exported_at: new Date().toISOString(),
       hypotheses,
@@ -209,17 +264,49 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
           utterance_text: utterances[r.utterance]?.text ?? "",
           speaker: utterances[r.utterance]?.speaker ?? null,
         })),
-    }),
-    [encounter.id, hypotheses, ratings, utterances],
-  )
+      // Timing of the recall recording: segment the audio per utterance by
+      // cutting between consecutive clicks (offsets are recorded time, so
+      // they map directly onto the audio file even across pauses).
+      recording: timeline
+        ? {
+            started_at: timeline.startedAt,
+            stopped_at: timeline.stoppedAt ?? null,
+            duration_seconds: timeline.durationSeconds ?? null,
+            utterance_clicks: timeline.utteranceClicks.map((c) => ({
+              utterance: c.utterance,
+              audio_offset_seconds: c.audioOffsetSeconds,
+              at: c.at,
+            })),
+          }
+        : null,
+    }
+  }, [encounter.id, hypotheses, ratings, utterances])
 
   const startRecall = async () => {
     try {
       await recorder.startRecording()
+      // Fresh timeline per take: a re-record replaces the audio, so it
+      // replaces the click timings too.
+      timelineRef.current = { startedAt: new Date().toISOString(), utteranceClicks: [] }
+      recordedMsRef.current = 0
+      runningSinceRef.current = performance.now()
       setRecallStatus("recording")
     } catch {
       setRecallStatus("failed")
     }
+  }
+
+  const pauseRecall = () => {
+    if (runningSinceRef.current !== null) {
+      recordedMsRef.current += performance.now() - runningSinceRef.current
+      runningSinceRef.current = null
+    }
+    void recorder.pauseRecording()
+  }
+
+  const resumeRecall = () => {
+    if (runningSinceRef.current === null) runningSinceRef.current = performance.now()
+    void recorder.resumeRecording()
   }
 
   const uploadRecall = useCallback(
@@ -259,8 +346,15 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
   )
 
   const stopRecall = async () => {
+    if (timelineRef.current) {
+      timelineRef.current.stoppedAt = new Date().toISOString()
+      timelineRef.current.durationSeconds = recordedOffsetSeconds()
+    }
+    runningSinceRef.current = null
     const blob = await recorder.stopRecording()
     recallBlobRef.current = blob
+    // Keep the timeline even if archival fails or is not configured.
+    persist(hypotheses, ratings)
     if (blob) {
       // Store locally right away so the strip morphs into a playable player;
       // the archived copy uploads in the background.
@@ -309,8 +403,8 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
             isPaused={recorder.isPaused}
             analyser={recorder.analyser}
             onStop={() => void stopRecall()}
-            onPause={recorder.pauseRecording}
-            onResume={recorder.resumeRecording}
+            onPause={pauseRecall}
+            onResume={resumeRecall}
             stopLabel="Stop & archive"
           />
         ) : (
