@@ -2,7 +2,7 @@
  * Archive one consultation to the configured storage backend, in two phases.
  *
  * Lays out a self-contained, analyzable container per consultation (a Box
- * folder, or an R2 key prefix):
+ * folder):
  *
  *   <container>/
  *     audio.wav            the consult recording (omitted if unavailable)
@@ -22,7 +22,7 @@
  *     writes note.md plus the metadata.json manifest.
  *
  * Both phases derive the same container name from (createdAt, encounterId) and
- * uploads are idempotent (Box writes a new version; R2 overwrites the key), so
+ * uploads are idempotent (Box writes a new version on re-upload), so
  * they compose regardless of order or which instance each runs on.
  *
  * The container name deliberately avoids PHI (uses the encounter id, not the

@@ -1,16 +1,14 @@
 /**
- * Backend-neutral storage interface for consultation archival.
+ * Storage interface for consultation archival.
  *
  * The two-phase archival orchestration (see ./archive.ts) is written against
- * this interface, so the same per-consult layout can be pushed to Box (folders)
- * or Cloudflare R2 (object-key prefixes) — or any future backend — without the
- * orchestration knowing which. Each backend supplies a small adapter:
- *   - Box:  ./box-adapter.ts  (wraps the existing BoxClient)
- *   - R2:   ./r2/client.ts    (S3 PutObject / ListObjectsV2 over aws4fetch)
+ * this interface rather than a concrete client, keeping the per-consult layout
+ * independent of the backend. Box is the sole implementation
+ * (./box-adapter.ts, wrapping BoxClient).
  */
 
 export interface StorageFileRef {
-  /** Backend id: a Box file id, or the full R2 object key. */
+  /** Backend id (a Box file id). */
   id: string
   name: string
   size?: number
@@ -25,8 +23,7 @@ export interface StorageClient {
 
   /**
    * Ensure the per-consult container exists and return its id. For Box this
-   * creates (or reuses) a subfolder and returns its numeric id; for R2 there is
-   * nothing to create, so it simply returns the key prefix.
+   * creates (or reuses) a subfolder and returns its numeric id.
    */
   ensureContainer(name: string): Promise<string>
 
@@ -35,7 +32,7 @@ export interface StorageClient {
 
   /**
    * Create or overwrite a file in the container. `existingId` lets Box write a
-   * new version of a known file; R2 overwrites by key and ignores it.
+   * new version of a known file instead of creating a duplicate.
    */
   uploadFile(
     containerId: string,

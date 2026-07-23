@@ -28,7 +28,7 @@ function jsonError(status: number, code: string, message: string) {
 
 /**
  * Phase 2 of consultation archival: write the clinical note and the
- * metadata.json manifest to the consult's container (Box folder / R2 prefix).
+ * metadata.json manifest to the consult's container (a Box folder).
  *
  * The heavy artifacts (audio + raw Deepgram JSON + transcript) are uploaded
  * earlier by the transcription request itself (phase 1), so this route carries
