@@ -69,6 +69,67 @@ test("disabled when CCG creds are incomplete and no token", () => {
   assert.match((result as { reason: string }).reason, /auth is incomplete/)
 })
 
+const JWT_FILE = JSON.stringify({
+  boxAppSettings: {
+    clientID: "jwt-cid",
+    clientSecret: "jwt-secret",
+    appAuth: { publicKeyID: "kid1", privateKey: "-----BEGIN ENCRYPTED PRIVATE KEY-----\nx\n-----END ENCRYPTED PRIVATE KEY-----", passphrase: "pp" },
+  },
+  enterpriseID: "679891",
+})
+
+test("JWT config resolved from raw JSON", () => {
+  const result = getBoxConfig({ BOX_ENABLED: "true", BOX_FOLDER_ID: "123", BOX_JWT_CONFIG: JWT_FILE })
+  assert.equal(result.enabled, true)
+  if (!result.enabled || result.config.auth.type !== "jwt") return assert.fail("expected jwt auth")
+  assert.equal(result.config.auth.clientId, "jwt-cid")
+  assert.equal(result.config.auth.publicKeyId, "kid1")
+  assert.equal(result.config.auth.subjectId, "679891")
+  assert.equal(result.config.auth.subjectType, "enterprise")
+})
+
+test("JWT config resolved from base64", () => {
+  const b64 = Buffer.from(JWT_FILE).toString("base64")
+  const result = getBoxConfig({ BOX_ENABLED: "true", BOX_FOLDER_ID: "123", BOX_JWT_CONFIG: b64 })
+  assert.equal(result.enabled, true)
+  if (!result.enabled) return
+  assert.equal(result.config.auth.type, "jwt")
+})
+
+test("JWT takes precedence over CCG, developer token over JWT", () => {
+  const env = { ...BASE, BOX_ENABLED: "true", BOX_JWT_CONFIG: JWT_FILE }
+  const jwtResult = getBoxConfig(env)
+  assert.equal(jwtResult.enabled && jwtResult.config.auth.type, "jwt")
+  const tokenResult = getBoxConfig({ ...env, BOX_DEVELOPER_TOKEN: "tok" })
+  assert.equal(tokenResult.enabled && tokenResult.config.auth.type, "token")
+})
+
+test("BOX_SUBJECT_ID overrides the JWT file's enterpriseID", () => {
+  const result = getBoxConfig({ BOX_ENABLED: "true", BOX_FOLDER_ID: "123", BOX_JWT_CONFIG: JWT_FILE, BOX_SUBJECT_ID: "42" })
+  assert.equal(result.enabled, true)
+  if (!result.enabled || result.config.auth.type !== "jwt") return assert.fail("expected jwt auth")
+  assert.equal(result.config.auth.subjectId, "42")
+})
+
+test("malformed JWT config disables with a reason instead of falling back to CCG", () => {
+  const result = getBoxConfig({ ...BASE, BOX_ENABLED: "true", BOX_JWT_CONFIG: "not-json-not-base64{{{" })
+  assert.equal(result.enabled, false)
+  assert.match((result as { reason: string }).reason, /BOX_JWT_CONFIG/)
+})
+
+test("JWT config missing fields disables with a reason", () => {
+  const partial = JSON.stringify({ boxAppSettings: { clientID: "cid" }, enterpriseID: "1" })
+  const result = getBoxConfig({ BOX_ENABLED: "true", BOX_FOLDER_ID: "123", BOX_JWT_CONFIG: partial })
+  assert.equal(result.enabled, false)
+  assert.match((result as { reason: string }).reason, /missing boxAppSettings/)
+})
+
+test("JWT with BOX_SUBJECT_TYPE=user requires explicit BOX_SUBJECT_ID", () => {
+  const result = getBoxConfig({ BOX_ENABLED: "true", BOX_FOLDER_ID: "123", BOX_JWT_CONFIG: JWT_FILE, BOX_SUBJECT_TYPE: "user" })
+  assert.equal(result.enabled, false)
+  assert.match((result as { reason: string }).reason, /BOX_SUBJECT_ID/)
+})
+
 test("isBoxArchivingEnabled mirrors getBoxConfig", () => {
   assert.equal(isBoxArchivingEnabled({ ...BASE }), false)
   assert.equal(isBoxArchivingEnabled({ ...BASE, BOX_ENABLED: "true" }), true)

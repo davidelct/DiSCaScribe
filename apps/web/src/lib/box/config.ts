@@ -6,10 +6,12 @@
  * simply not pushed to Box), so the absence of Box credentials is never an
  * error — callers treat a disabled config as a graceful no-op.
  *
- * Two auth modes are supported:
- *  - Client Credentials Grant (CCG): a service account, recommended for
- *    production. Acts as the App User when the subject is the enterprise.
+ * Three auth modes are supported, resolved in this order:
  *  - Developer token: a short-lived (~60 min) token, handy for local testing.
+ *  - JWT (Server Authentication with JWT): the mode of the Imperial-approved
+ *    app. `BOX_JWT_CONFIG` holds the dev-console keypair config JSON, either
+ *    raw or base64-encoded (base64 keeps it on one .env line).
+ *  - Client Credentials Grant (CCG): a service account via client id/secret.
  */
 
 export type BoxAuth =
@@ -18,6 +20,16 @@ export type BoxAuth =
       type: "ccg"
       clientId: string
       clientSecret: string
+      subjectId: string
+      subjectType: "enterprise" | "user"
+    }
+  | {
+      type: "jwt"
+      clientId: string
+      clientSecret: string
+      publicKeyId: string
+      privateKey: string
+      passphrase: string
       subjectId: string
       subjectType: "enterprise" | "user"
     }
@@ -42,6 +54,67 @@ function trimmed(value: string | undefined): string {
   return value?.trim() || ""
 }
 
+/** Shape of the config JSON downloaded from the Box dev console keypair generator. */
+interface BoxJwtConfigFile {
+  boxAppSettings?: {
+    clientID?: string
+    clientSecret?: string
+    appAuth?: { publicKeyID?: string; privateKey?: string; passphrase?: string }
+  }
+  enterpriseID?: string
+}
+
+type JwtAuth = Extract<BoxAuth, { type: "jwt" }>
+
+/**
+ * Parse `BOX_JWT_CONFIG` (raw JSON or base64-encoded JSON). Returns the auth on
+ * success, `null` when the variable is unset, and a reason string when it is
+ * set but unusable — a present-but-broken JWT config must surface its error,
+ * not silently fall through to CCG.
+ */
+function parseJwtConfig(env: Record<string, string | undefined>): JwtAuth | string | null {
+  const rawValue = trimmed(env.BOX_JWT_CONFIG)
+  if (!rawValue) return null
+
+  let json = rawValue
+  if (!rawValue.startsWith("{")) {
+    try {
+      json = Buffer.from(rawValue, "base64").toString("utf8")
+    } catch {
+      return "BOX_JWT_CONFIG is neither JSON nor valid base64"
+    }
+  }
+
+  let parsed: BoxJwtConfigFile
+  try {
+    parsed = JSON.parse(json) as BoxJwtConfigFile
+  } catch {
+    return "BOX_JWT_CONFIG does not decode to valid JSON"
+  }
+
+  const settings = parsed.boxAppSettings
+  const appAuth = settings?.appAuth
+  const clientId = trimmed(settings?.clientID)
+  const clientSecret = trimmed(settings?.clientSecret)
+  const publicKeyId = trimmed(appAuth?.publicKeyID)
+  const privateKey = appAuth?.privateKey?.trim() || ""
+  const passphrase = appAuth?.passphrase ?? ""
+  if (!clientId || !clientSecret || !publicKeyId || !privateKey) {
+    return "BOX_JWT_CONFIG is missing boxAppSettings.clientID/clientSecret/appAuth.publicKeyID/privateKey"
+  }
+
+  const subjectType = trimmed(env.BOX_SUBJECT_TYPE).toLowerCase() === "user" ? "user" : "enterprise"
+  const subjectId = trimmed(env.BOX_SUBJECT_ID) || trimmed(parsed.enterpriseID)
+  if (!subjectId) {
+    return "BOX_JWT_CONFIG has no enterpriseID and BOX_SUBJECT_ID is not set"
+  }
+  if (subjectType === "user" && !trimmed(env.BOX_SUBJECT_ID)) {
+    return "BOX_SUBJECT_TYPE=user requires an explicit BOX_SUBJECT_ID"
+  }
+
+  return { type: "jwt", clientId, clientSecret, publicKeyId, privateKey, passphrase, subjectId, subjectType }
+}
+
 /**
  * Resolve Box archival configuration from the environment. Returns a disabled
  * result with a human-readable reason when archiving is off or incompletely
@@ -62,6 +135,14 @@ export function getBoxConfig(env: Record<string, string | undefined> = process.e
     return { enabled: true, config: { folderId, auth: { type: "token", token } } }
   }
 
+  const jwt = parseJwtConfig(env)
+  if (typeof jwt === "string") {
+    return { enabled: false, reason: jwt }
+  }
+  if (jwt) {
+    return { enabled: true, config: { folderId, auth: jwt } }
+  }
+
   const clientId = trimmed(env.BOX_CLIENT_ID)
   const clientSecret = trimmed(env.BOX_CLIENT_SECRET)
   const subjectId = trimmed(env.BOX_SUBJECT_ID)
@@ -77,7 +158,7 @@ export function getBoxConfig(env: Record<string, string | undefined> = process.e
   return {
     enabled: false,
     reason:
-      "Box auth is incomplete — set BOX_DEVELOPER_TOKEN, or BOX_CLIENT_ID + BOX_CLIENT_SECRET + BOX_SUBJECT_ID",
+      "Box auth is incomplete — set BOX_DEVELOPER_TOKEN, BOX_JWT_CONFIG, or BOX_CLIENT_ID + BOX_CLIENT_SECRET + BOX_SUBJECT_ID",
   }
 }
 

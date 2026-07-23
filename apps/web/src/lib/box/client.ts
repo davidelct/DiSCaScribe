@@ -1,7 +1,8 @@
 /**
  * Minimal Box API client for archival uploads (server-side only).
  *
- * Supports both auth modes (Client Credentials Grant and a developer token),
+ * Supports all three auth modes (JWT server auth, Client Credentials Grant,
+ * and a developer token),
  * ensures a per-consultation subfolder exists, and uploads files via Box's
  * simple endpoint (≤ 50 MB) or chunked upload sessions (larger). Uploads are
  * idempotent: when a file of the same name already exists it is written as a
@@ -11,7 +12,7 @@
  * Docs: https://developer.box.com/reference/
  */
 
-import { createHash } from "node:crypto"
+import { createHash, createPrivateKey, randomBytes, sign as signPayload } from "node:crypto"
 import type { BoxAuth, BoxConfig } from "./config"
 
 const TOKEN_URL = "https://api.box.com/oauth2/token"
@@ -59,6 +60,33 @@ function sha1Base64(data: Buffer): string {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const base64Url = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url")
+
+/**
+ * Build the signed JWT assertion for Box server auth (RS512, per Box's SDKs).
+ * The private key from the dev-console config JSON is an encrypted PKCS#8 PEM;
+ * node:crypto decrypts it with the accompanying passphrase. Box caps `exp` at
+ * 60 seconds out, so the assertion is minted fresh per token request.
+ */
+export function buildJwtAssertion(
+  auth: Extract<BoxAuth, { type: "jwt" }>,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): string {
+  const header = { alg: "RS512", typ: "JWT", kid: auth.publicKeyId }
+  const claims = {
+    iss: auth.clientId,
+    sub: auth.subjectId,
+    box_sub_type: auth.subjectType,
+    aud: TOKEN_URL,
+    jti: randomBytes(20).toString("hex"),
+    exp: nowSeconds + 45,
+  }
+  const signingInput = `${base64Url(header)}.${base64Url(claims)}`
+  const key = createPrivateKey({ key: auth.privateKey, passphrase: auth.passphrase })
+  const signature = signPayload("sha512", new Uint8Array(Buffer.from(signingInput)), key).toString("base64url")
+  return `${signingInput}.${signature}`
+}
+
 export class BoxClient {
   private cachedToken: { value: string; expiresAt: number } | null = null
 
@@ -76,16 +104,25 @@ export class BoxClient {
       return this.cachedToken.value
     }
 
+    const grant: Record<string, string> =
+      this.auth.type === "jwt"
+        ? {
+            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            assertion: buildJwtAssertion(this.auth),
+            client_id: this.auth.clientId,
+            client_secret: this.auth.clientSecret,
+          }
+        : {
+            grant_type: "client_credentials",
+            client_id: this.auth.clientId,
+            client_secret: this.auth.clientSecret,
+            box_subject_type: this.auth.subjectType,
+            box_subject_id: this.auth.subjectId,
+          }
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: this.auth.clientId,
-        client_secret: this.auth.clientSecret,
-        box_subject_type: this.auth.subjectType,
-        box_subject_id: this.auth.subjectId,
-      }),
+      body: new URLSearchParams(grant),
     })
     if (!res.ok) {
       throw new BoxApiError(`Box token request failed (${res.status})`, res.status, await res.text())
