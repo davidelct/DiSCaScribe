@@ -4,6 +4,7 @@ import { resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } 
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveTranscriptionArtifacts, getArchivalConfig } from "@/lib/archival"
+import { DEEPGRAM_KEY_HEADER, resolveRequestKey } from "@/lib/request-keys"
 
 export const runtime = "nodejs"
 
@@ -38,6 +39,12 @@ function isBlankTranscript(text: string): boolean {
  */
 export async function POST(req: NextRequest) {
   try {
+    // BYOK sessions must supply their own Deepgram key; full sessions may.
+    const keys = await resolveRequestKey(req, DEEPGRAM_KEY_HEADER)
+    if (!keys.ok) {
+      return jsonError(keys.status, keys.code, keys.message, false)
+    }
+
     const formData = await req.formData()
     const sessionId = formData.get("session_id")
     const file = formData.get("file")
@@ -68,6 +75,7 @@ export async function POST(req: NextRequest) {
       const detail = await transcribeWithResolvedProviderDetailed(Buffer.from(arrayBuffer), filename, resolvedProvider, {
         diarize: true,
         contentType,
+        apiKey: keys.apiKey,
       })
       const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
@@ -85,7 +93,7 @@ export async function POST(req: NextRequest) {
       // client triggers phase 2 (metadata manifest) on that event, and the
       // manifest lists whichever artifacts are already in the container.
       if (encounterId) {
-        const archival = getArchivalConfig()
+        const archival = getArchivalConfig(keys.role)
         if (archival.enabled) {
           try {
             await archiveTranscriptionArtifacts({

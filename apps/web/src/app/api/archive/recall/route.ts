@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveRecallArtifacts, getArchivalConfig } from "@/lib/archival"
+import { requestSessionRole } from "@/lib/request-keys"
 
 export const runtime = "nodejs"
 
@@ -55,7 +56,11 @@ export async function POST(req: NextRequest) {
       return jsonError(400, "validation_error", "Nothing to archive: provide file and/or session")
     }
 
-    const archival = getArchivalConfig()
+    const role = await requestSessionRole(req)
+    if (!role) {
+      return jsonError(401, "invalid_session", "Session expired. Log in again.")
+    }
+    const archival = getArchivalConfig(role)
     if (!archival.enabled) {
       return new Response(JSON.stringify({ skipped: true, reason: archival.reason }), {
         headers: { "Content-Type": "application/json" },

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server"
 import { resolveTranscriptionProvider } from "@transcription"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveNoteAndMetadata, getArchivalConfig } from "@/lib/archival"
+import { requestSessionRole } from "@/lib/request-keys"
 
 export const runtime = "nodejs"
 
@@ -73,7 +74,11 @@ export async function POST(req: NextRequest) {
     encounterId = encounter.id
     const transcriptField = body.transcript
 
-    const archival = getArchivalConfig()
+    const role = await requestSessionRole(req)
+    if (!role) {
+      return jsonError(401, "invalid_session", "Session expired. Log in again.")
+    }
+    const archival = getArchivalConfig(role)
     if (!archival.enabled) {
       // Not an error — archival is simply not set up. Tell the client to mark it skipped.
       return new Response(JSON.stringify({ skipped: true, reason: archival.reason }), {

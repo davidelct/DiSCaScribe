@@ -7,6 +7,7 @@
  * archival credentials).
  */
 
+import type { SessionRole } from "@/lib/auth"
 import { getBoxConfig } from "@/lib/box"
 import { BoxStorageClient } from "./box-adapter"
 import type { StorageClient } from "./types"
@@ -15,17 +16,26 @@ export type ArchivalConfigResult =
   | { enabled: true; backend: "box"; client: StorageClient }
   | { enabled: false; reason: string }
 
+/**
+ * BYOK sessions archive into their own Box folder (BOX_FOLDER_ID_BYOK) so
+ * tester consultations stay separate from the study's. Falls back to the main
+ * folder when the BYOK folder is unconfigured — a misfiled container can be
+ * moved later, an unarchived one is gone.
+ */
 export function getArchivalConfig(
+  role: SessionRole = "full",
   env: Record<string, string | undefined> = process.env,
 ): ArchivalConfigResult {
   const box = getBoxConfig(env)
   if (!box.enabled) {
     return { enabled: false, reason: box.reason }
   }
+  const byokFolderId = (env.BOX_FOLDER_ID_BYOK ?? "").trim()
+  const folderId = role === "byok" && byokFolderId ? byokFolderId : box.config.folderId
   return {
     enabled: true,
     backend: "box",
-    client: new BoxStorageClient(box.config, box.config.folderId),
+    client: new BoxStorageClient(box.config, folderId),
   }
 }
 
@@ -33,5 +43,5 @@ export function getArchivalConfig(
 export function isArchivingEnabled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  return getArchivalConfig(env).enabled
+  return getArchivalConfig("full", env).enabled
 }

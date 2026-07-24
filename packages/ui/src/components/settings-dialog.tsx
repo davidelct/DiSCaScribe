@@ -5,6 +5,7 @@ import { X } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
+import { loadByokApiKeys, saveByokApiKeys } from "@storage/api-keys-client"
 import type { EncounterMode } from "@storage/types"
 import { AuditLogViewer } from "./audit-log-viewer"
 
@@ -41,12 +42,18 @@ export function SettingsDialog({
   const [saveMessage, setSaveMessage] = useState("")
   const [retentionDays, setRetentionDays] = useState(90)
   const [showAuditViewer, setShowAuditViewer] = useState(false)
+  const [deepgramApiKey, setDeepgramApiKey] = useState("")
+  const [anthropicApiKey, setAnthropicApiKey] = useState("")
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const purgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (isOpen) {
       setRetentionDays(getAuditRetentionDays())
+      void loadByokApiKeys().then((keys) => {
+        setDeepgramApiKey(keys.deepgramApiKey ?? "")
+        setAnthropicApiKey(keys.anthropicApiKey ?? "")
+      })
     }
   }, [isOpen])
 
@@ -64,6 +71,9 @@ export function SettingsDialog({
     try {
       // Save retention policy
       setAuditRetentionDays(retentionDays)
+
+      // Save BYOK provider keys (encrypted, this browser only)
+      await saveByokApiKeys({ deepgramApiKey, anthropicApiKey })
 
       setSaveMessage("Settings saved successfully")
       saveTimerRef.current = setTimeout(() => {
@@ -182,6 +192,52 @@ export function SettingsDialog({
                 Applies immediately to new consultations; in recording-only mode the interface turns green
               </p>
             </div>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-border" />
+
+          {/* API Keys (bring your own) */}
+          <div className="space-y-3">
+            <Label className="text-base font-medium text-foreground">API Keys</Label>
+            <p className="text-sm text-muted-foreground">
+              Bring-your-own-key accounts must provide a Deepgram key (transcription) and an Anthropic key
+              (note generation). Keys are stored encrypted in this browser only and sent with each request —
+              the server never saves them. Leave blank to use the server&apos;s keys, if your account allows it.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="byok-deepgram-key" className="text-sm font-medium text-foreground">
+                Deepgram API Key
+              </Label>
+              <input
+                id="byok-deepgram-key"
+                type="password"
+                autoComplete="off"
+                value={deepgramApiKey}
+                onChange={(e) => setDeepgramApiKey(e.target.value)}
+                placeholder="Deepgram key from console.deepgram.com"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="byok-anthropic-key" className="text-sm font-medium text-foreground">
+                Anthropic API Key
+              </Label>
+              <input
+                id="byok-anthropic-key"
+                type="password"
+                autoComplete="off"
+                value={anthropicApiKey}
+                onChange={(e) => setAnthropicApiKey(e.target.value)}
+                placeholder="sk-ant-… from console.anthropic.com"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {deepgramApiKey.trim() || anthropicApiKey.trim()
+                ? "Using your keys for the fields provided; anything left blank falls back to the server's keys (if allowed)."
+                : "No personal keys set — requests use the server's keys (not available on bring-your-own-key accounts)."}
+            </p>
           </div>
 
           {/* Divider */}

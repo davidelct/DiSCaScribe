@@ -21,6 +21,8 @@ export interface TranscriptionRequestOptions {
   diarize?: boolean
   /** MIME type of the audio bytes, used for non-WAV uploads (e.g. mp3/m4a). */
   contentType?: string
+  /** Caller-supplied Deepgram key (BYOK sessions); falls back to the env key. */
+  apiKey?: string
 }
 
 const DEFAULT_DEEPGRAM_MODEL = "nova-3"
@@ -43,6 +45,7 @@ export async function transcribeWithResolvedProvider(
     model: resolved.model,
     diarize: options.diarize,
     contentType: options.contentType,
+    apiKey: options.apiKey,
   })
 }
 
@@ -67,5 +70,6 @@ export async function transcribeWithResolvedProviderDetailed(
     model: resolved.model,
     diarize: options.diarize,
     contentType: options.contentType,
+    apiKey: options.apiKey,
   })
 }

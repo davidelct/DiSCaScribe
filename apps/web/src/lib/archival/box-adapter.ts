@@ -13,7 +13,7 @@ export class BoxStorageClient implements StorageClient {
 
   constructor(
     config: BoxConfig,
-    private readonly parentFolderId: string,
+    readonly parentFolderId: string,
   ) {
     this.client = BoxClient.fromConfig(config)
   }

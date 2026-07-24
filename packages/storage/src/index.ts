@@ -1,6 +1,7 @@
 export * from "./types"
 export * from "./encounters"
 export * from "./secure-storage"
+export * from "./api-keys-client"
 export * from "./preferences"
 export * from "./debug-logger"
 export * from "./audit-log"

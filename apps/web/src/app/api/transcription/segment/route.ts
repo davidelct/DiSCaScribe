@@ -3,6 +3,7 @@ import { toPipelineError } from "@pipeline-errors"
 import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProvider } from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
+import { DEEPGRAM_KEY_HEADER, resolveRequestKey } from "@/lib/request-keys"
 
 export const runtime = "nodejs"
 
@@ -62,6 +63,12 @@ export async function POST(req: NextRequest) {
     // Some providers (e.g. Deepgram) transcribe only the full recording in a
     // single final pass, so live segment uploads are skipped entirely. Guard
     // here defensively in case a client still posts a segment.
+    // BYOK sessions must supply their own Deepgram key; full sessions may.
+    const keys = await resolveRequestKey(req, DEEPGRAM_KEY_HEADER)
+    if (!keys.ok) {
+      return jsonError(keys.status, keys.code, keys.message, false)
+    }
+
     const resolved = resolveTranscriptionProvider()
     if (!resolved.liveSegments) {
       return new Response(JSON.stringify({ ok: true, skipped: true, reason: "live_segments_disabled" }), {
@@ -121,7 +128,9 @@ export async function POST(req: NextRequest) {
     try {
       const resolvedProvider = resolveTranscriptionProvider()
       const startedAtMs = Date.now()
-      const transcript = await transcribeWithResolvedProvider(Buffer.from(arrayBuffer), `segment-${seqNo}.wav`, resolvedProvider)
+      const transcript = await transcribeWithResolvedProvider(Buffer.from(arrayBuffer), `segment-${seqNo}.wav`, resolvedProvider, {
+        apiKey: keys.apiKey,
+      })
       const latencyMs = Date.now() - startedAtMs
       transcriptionSessionStore.addSegment(sessionId, {
         seqNo,

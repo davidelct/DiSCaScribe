@@ -24,6 +24,7 @@ import {
   initializeAuditLog,
   saveEncounterAudio,
   deleteEncounterAudio,
+  loadByokApiKeys,
 } from "@storage"
 
 type ViewState =
@@ -517,11 +518,17 @@ function HomePageContent() {
         noteGenerationStartedAt: prev.noteGenerationStartedAt ?? Date.now(),
       }))
       try {
-        const note = await generateClinicalNote({
-          transcript,
-          patient_name: patientName,
-          visit_reason: visitReason,
-        })
+        // BYOK sessions supply their own Anthropic key; the server refuses to
+        // use its env key for them.
+        const byokKeys = await loadByokApiKeys()
+        const note = await generateClinicalNote(
+          {
+            transcript,
+            patient_name: patientName,
+            visit_reason: visitReason,
+          },
+          { anthropicApiKey: byokKeys.anthropicApiKey },
+        )
         await updateEncounterRef.current(encounterId, {
           note_text: note,
           note_version: 0,
@@ -812,8 +819,11 @@ function HomePageContent() {
       const url = baseUrl
         ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
         : "/api/transcription/upload"
+      // BYOK sessions supply their own Deepgram key with each request.
+      const byokKeys = await loadByokApiKeys()
       const response = await fetch(url, {
         method: "POST",
+        headers: byokKeys.deepgramApiKey ? { "x-deepgram-key": byokKeys.deepgramApiKey } : undefined,
         body: formData,
       })
       if (!response.ok) {
@@ -884,7 +894,13 @@ function HomePageContent() {
         formData.append("file", file, file.name || `${activeSessionId}-upload`)
         if (encounterId) formData.append("encounter_id", encounterId)
         if (createdAt) formData.append("created_at", createdAt)
-        response = await fetch(url, { method: "POST", body: formData })
+        // BYOK sessions supply their own Deepgram key with each request.
+        const byokKeys = await loadByokApiKeys()
+        response = await fetch(url, {
+          method: "POST",
+          headers: byokKeys.deepgramApiKey ? { "x-deepgram-key": byokKeys.deepgramApiKey } : undefined,
+          body: formData,
+        })
       } catch (networkError) {
         if (attempt < maxAttempts) {
           await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
