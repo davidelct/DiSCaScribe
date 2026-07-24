@@ -25,8 +25,11 @@ test("byok sessions archive to the BYOK folder", () => {
   assert.equal(parentFolderOf(BASE, "byok"), "222")
 })
 
-test("byok falls back to the main folder when BOX_FOLDER_ID_BYOK is unset", () => {
-  assert.equal(parentFolderOf({ ...BASE, BOX_FOLDER_ID_BYOK: undefined }, "byok"), "111")
+test("byok archival is disabled when BOX_FOLDER_ID_BYOK is unset (never the main folder)", () => {
+  const result = getArchivalConfig("byok", { ...BASE, BOX_FOLDER_ID_BYOK: undefined })
+  assert.equal(result.enabled, false)
+  if (result.enabled) return
+  assert.match(result.reason, /BOX_FOLDER_ID_BYOK/)
 })
 
 test("disabled when Box is unconfigured, regardless of role", () => {

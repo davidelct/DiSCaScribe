@@ -18,9 +18,9 @@ export type ArchivalConfigResult =
 
 /**
  * BYOK sessions archive into their own Box folder (BOX_FOLDER_ID_BYOK) so
- * tester consultations stay separate from the study's. Falls back to the main
- * folder when the BYOK folder is unconfigured — a misfiled container can be
- * moved later, an unarchived one is gone.
+ * tester consultations stay separate from the study's. When that folder is
+ * unconfigured, BYOK archival is disabled entirely — tester data must never
+ * land in the study folder.
  */
 export function getArchivalConfig(
   role: SessionRole = "full",
@@ -30,8 +30,14 @@ export function getArchivalConfig(
   if (!box.enabled) {
     return { enabled: false, reason: box.reason }
   }
-  const byokFolderId = (env.BOX_FOLDER_ID_BYOK ?? "").trim()
-  const folderId = role === "byok" && byokFolderId ? byokFolderId : box.config.folderId
+  let folderId = box.config.folderId
+  if (role === "byok") {
+    const byokFolderId = (env.BOX_FOLDER_ID_BYOK ?? "").trim()
+    if (!byokFolderId) {
+      return { enabled: false, reason: "BOX_FOLDER_ID_BYOK is not set — BYOK sessions do not archive" }
+    }
+    folderId = byokFolderId
+  }
   return {
     enabled: true,
     backend: "box",
