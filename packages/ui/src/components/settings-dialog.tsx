@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { X } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ui/lib/ui/select"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
 import { loadByokApiKeys, saveByokApiKeys } from "@storage/api-keys-client"
 import type { EncounterMode } from "@storage/types"
@@ -134,19 +135,25 @@ export function SettingsDialog({
               <Label htmlFor="preferred-input-device" className="text-sm font-medium text-foreground">
                 Microphone Device
               </Label>
-              <select
-                id="preferred-input-device"
-                value={preferredInputDeviceId || ""}
-                onChange={(e) => onPreferredInputDeviceChange(e.target.value)}
-                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              {/* Radix Select forbids empty item values, so system default uses a sentinel. */}
+              <Select
+                value={preferredInputDeviceId || "__default__"}
+                onValueChange={(value) => onPreferredInputDeviceChange(value === "__default__" ? "" : value)}
               >
-                <option value="">System default microphone</option>
-                {audioInputDevices.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="preferred-input-device">
+                  <SelectValue placeholder="System default microphone" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">System default microphone</SelectItem>
+                  {audioInputDevices
+                    .filter((device) => device.id)
+                    .map((device) => (
+                      <SelectItem key={device.id} value={device.id}>
+                        {device.label}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => void onRunMicrophoneCheck()}>
@@ -179,15 +186,15 @@ export function SettingsDialog({
               <Label htmlFor="encounter-mode" className="text-sm font-medium text-foreground">
                 Capture Mode
               </Label>
-              <select
-                id="encounter-mode"
-                value={encounterMode}
-                onChange={(e) => onEncounterModeChange(e.target.value as EncounterMode)}
-                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-              >
-                <option value="scribed">Scribed — transcribe and generate clinical note</option>
-                <option value="recording_only">Recording only — transcribe and archive, no note</option>
-              </select>
+              <Select value={encounterMode} onValueChange={(value) => onEncounterModeChange(value as EncounterMode)}>
+                <SelectTrigger id="encounter-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="scribed">Scribed — transcribe and generate clinical note</SelectItem>
+                  <SelectItem value="recording_only">Recording only — transcribe and archive, no note</SelectItem>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
                 Applies immediately to new consultations; in recording-only mode the interface turns green
               </p>
@@ -255,17 +262,17 @@ export function SettingsDialog({
               <Label htmlFor="retention-days" className="text-sm font-medium text-foreground">
                 Log Retention Period
               </Label>
-              <select
-                id="retention-days"
-                value={retentionDays}
-                onChange={(e) => setRetentionDays(Number(e.target.value))}
-                className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-              >
-                <option value="30">30 days</option>
-                <option value="90">90 days (recommended)</option>
-                <option value="365">1 year</option>
-                <option value="2555">7 years (HIPAA maximum)</option>
-              </select>
+              <Select value={String(retentionDays)} onValueChange={(value) => setRetentionDays(Number(value))}>
+                <SelectTrigger id="retention-days">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">30 days</SelectItem>
+                  <SelectItem value="90">90 days (recommended)</SelectItem>
+                  <SelectItem value="365">1 year</SelectItem>
+                  <SelectItem value="2555">7 years (HIPAA maximum)</SelectItem>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
                 Logs older than this period will be automatically deleted
               </p>

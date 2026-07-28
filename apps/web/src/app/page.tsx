@@ -6,22 +6,43 @@
  * activity comes from local encounter storage.
  */
 
+import { useState } from "react"
 import Link from "next/link"
-import { ChevronRight, Users } from "lucide-react"
+import { ChevronRight, Search, Users } from "lucide-react"
 import { format } from "date-fns"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
+import { cn } from "@ui/lib/utils"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ui/lib/ui/select"
 import {
   PATIENTS,
   formatNhsNumber,
   patientAge,
   patientFullName,
+  searchPatients,
+  type PatientSearchField,
 } from "@storage"
 import type { Encounter } from "@storage/types"
 import { TopBar } from "./top-bar"
 
+const SEARCH_PLACEHOLDERS: Record<PatientSearchField, string> = {
+  name: "Search by name",
+  nhs_number: "Search by NHS number",
+  date_of_birth: "Search by date of birth",
+}
+
+type SexFilter = "all" | "male" | "female"
+
 function PatientRegister() {
   const { encounters } = useEncounters()
   const httpsWarning = useHttpsWarning()
+  const [query, setQuery] = useState("")
+  const [searchField, setSearchField] = useState<PatientSearchField>("name")
+  const [sexFilter, setSexFilter] = useState<SexFilter>("all")
+  const patients = searchPatients({
+    query,
+    field: searchField,
+    sex: sexFilter === "all" ? undefined : sexFilter,
+  })
 
   const consultationsFor = (patientId: string): Encounter[] =>
     encounters.filter((e: Encounter) => e.patient_id === patientId)
@@ -46,8 +67,59 @@ function PatientRegister() {
           </span>
         </div>
 
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          {/* Joined control: field picker + query input share one search bar. */}
+          <div className="flex h-11 min-w-64 max-w-xl flex-1 items-center rounded-full border border-border bg-card shadow-soft transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-ring/30">
+            <Select value={searchField} onValueChange={(value) => setSearchField(value as PatientSearchField)}>
+              <SelectTrigger
+                aria-label="Search field"
+                className="h-full w-auto shrink-0 rounded-l-full rounded-r-none border-0 border-r border-border bg-transparent pl-4 pr-3 text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-44">
+                <SelectItem value="name">Name</SelectItem>
+                <SelectItem value="nhs_number">NHS number</SelectItem>
+                <SelectItem value="date_of_birth">Date of birth</SelectItem>
+              </SelectContent>
+            </Select>
+            <Search className="ml-3.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <input
+              placeholder={SEARCH_PLACEHOLDERS[searchField]}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search patients"
+              className="h-full w-full rounded-r-full bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="flex items-center gap-1 rounded-full bg-muted p-1" role="group" aria-label="Filter by sex">
+            {(["all", "male", "female"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setSexFilter(value)}
+                className={cn(
+                  "rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                  sexFilter === value
+                    ? "bg-card text-foreground shadow-soft"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {value === "all" ? "All" : value === "male" ? "Male" : "Female"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {patients.length === 0 && (
+          <div className="animate-fade-up flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border bg-card/50 px-8 py-12 text-center">
+            <Search className="h-6 w-6 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No patients match the current search and filters.</p>
+          </div>
+        )}
+
         <div className="animate-fade-up space-y-3">
-          {PATIENTS.map((patient) => {
+          {patients.map((patient) => {
             const consults = consultationsFor(patient.id)
             const lastConsult = consults[0]
             return (

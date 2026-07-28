@@ -14,9 +14,13 @@
 
 import type { Patient, PatientObservation } from "./types"
 
+// Patient ids are opaque and stable, like a real EPR's internal record ids.
+// Never derive them from patient identity: they appear in URLs, encounter
+// records and archive metadata, all places the codebase keeps free of
+// identifying detail (same principle as the PHI-free Box container names).
 export const PATIENTS: Patient[] = [
   {
-    id: "pat-derek-heath",
+    id: "p-2c9d41ae",
     nhs_number: "9990001014",
     given_name: "Derek",
     family_name: "Heath",
@@ -33,7 +37,7 @@ export const PATIENTS: Patient[] = [
       "68-year-old man, Caucasian. Infrequent attender — last seen in 2022 for an infected finger laceration. Long-standing heavy smoker. No chronic conditions or regular medications on record.",
   },
   {
-    id: "pat-andrew-marchant",
+    id: "p-b83f60d2",
     nhs_number: "9990002010",
     given_name: "Andrew",
     family_name: "Marchant",
@@ -50,7 +54,7 @@ export const PATIENTS: Patient[] = [
       "60-year-old man, Caucasian. Infrequent attender — last seen a year ago with low back pain. Background of early knee osteoarthritis. Non-smoker.",
   },
   {
-    id: "pat-kelly-latimer",
+    id: "p-7e15c8f4",
     nhs_number: "9990003017",
     given_name: "Kelly",
     family_name: "Latimer",
@@ -71,7 +75,7 @@ export const PATIENTS: Patient[] = [
 export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   {
     id: "obs-derek-bp-2022",
-    patient_id: "pat-derek-heath",
+    patient_id: "p-2c9d41ae",
     date: "2022-06-15",
     name: "Blood pressure",
     value: "140/78",
@@ -80,17 +84,17 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   },
   {
     id: "obs-derek-weight-2022",
-    patient_id: "pat-derek-heath",
+    patient_id: "p-2c9d41ae",
     date: "2022-06-15",
     name: "Weight",
     value: "93",
     unit: "kg",
     notes: "BMI 31.1 (2022)",
   },
-  { id: "obs-derek-height", patient_id: "pat-derek-heath", date: "2022-06-15", name: "Height", value: "1.73", unit: "m" },
+  { id: "obs-derek-height", patient_id: "p-2c9d41ae", date: "2022-06-15", name: "Height", value: "1.73", unit: "m" },
   {
     id: "obs-andrew-bp-2025",
-    patient_id: "pat-andrew-marchant",
+    patient_id: "p-b83f60d2",
     date: "2025-07-01",
     name: "Blood pressure",
     value: "140/95",
@@ -99,7 +103,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   },
   {
     id: "obs-andrew-weight",
-    patient_id: "pat-andrew-marchant",
+    patient_id: "p-b83f60d2",
     date: "2025-07-01",
     name: "Weight",
     value: "88",
@@ -108,7 +112,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   },
   {
     id: "obs-andrew-height",
-    patient_id: "pat-andrew-marchant",
+    patient_id: "p-b83f60d2",
     date: "2025-07-01",
     name: "Height",
     value: "1.70",
@@ -116,7 +120,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   },
   {
     id: "obs-kelly-weight",
-    patient_id: "pat-kelly-latimer",
+    patient_id: "p-7e15c8f4",
     date: "2026-07-08",
     name: "Weight",
     value: "66",
@@ -125,7 +129,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
   },
   {
     id: "obs-kelly-height",
-    patient_id: "pat-kelly-latimer",
+    patient_id: "p-7e15c8f4",
     date: "2026-07-08",
     name: "Height",
     value: "1.62",
@@ -157,6 +161,73 @@ export function formatNhsNumber(nhsNumber: string): string {
   const digits = nhsNumber.replace(/\D/g, "")
   if (digits.length !== 10) return nhsNumber
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
+}
+
+const MONTH_SHORT = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+/** Which register field a search query runs against. */
+export type PatientSearchField = "name" | "nhs_number" | "date_of_birth"
+
+export interface PatientSearchCriteria {
+  /** Free text, interpreted according to `field`. Empty means no text filter. */
+  query?: string
+  /** Field the query targets. Defaults to "name". */
+  field?: PatientSearchField
+  /** Restrict to one sex; omit for all. */
+  sex?: Patient["sex"]
+}
+
+function matchesName(patient: Patient, query: string): boolean {
+  return `${patient.given_name} ${patient.family_name}`.toLowerCase().includes(query)
+}
+
+/** Digit-run substring, tolerant of the 3-3-4 display grouping. */
+function matchesNhsNumber(patient: Patient, query: string): boolean {
+  const digits = query.replace(/[\s-]/g, "")
+  return digits.length > 0 && /^\d+$/.test(digits) && patient.nhs_number.includes(digits)
+}
+
+/**
+ * DOB matching for progressive typing: ISO or UK numeric forms (any of
+ * . / - separators) match as prefixes ("15/09" already narrows), a bare year
+ * matches exactly, and written fragments ("sep", "sep 1957") match once three
+ * characters long.
+ */
+function matchesDateOfBirth(patient: Patient, query: string): boolean {
+  const [year, month, day] = patient.date_of_birth.split("-")
+  const monthName = MONTH_SHORT[Number(month) - 1] ?? ""
+  const normalized = query.replace(/[./]/g, "-")
+
+  if (normalized === year) return true
+  const prefixForms = [
+    patient.date_of_birth, // 1957-09-15
+    `${day}-${month}-${year}`, // 15-09-1957
+    `${Number(day)}-${Number(month)}-${year}`, // 15-9-1957
+  ]
+  if (/\d/.test(normalized) && prefixForms.some((form) => form.startsWith(normalized))) return true
+
+  const written = `${Number(day)} ${monthName} ${year}` // "15 sep 1957"
+  return query.length >= 3 && written.includes(query)
+}
+
+const FIELD_MATCHERS: Record<PatientSearchField, (patient: Patient, query: string) => boolean> = {
+  name: matchesName,
+  nhs_number: matchesNhsNumber,
+  date_of_birth: matchesDateOfBirth,
+}
+
+/**
+ * Filter the register: an optional text query against one chosen field, plus
+ * an optional sex filter. Both empty returns everyone.
+ */
+export function searchPatients(criteria: PatientSearchCriteria): Patient[] {
+  const query = (criteria.query ?? "").trim().toLowerCase()
+  const matcher = FIELD_MATCHERS[criteria.field ?? "name"]
+  return PATIENTS.filter((patient) => {
+    if (criteria.sex && patient.sex !== criteria.sex) return false
+    if (query && !matcher(patient, query)) return false
+    return true
+  })
 }
 
 /** Whole years old at `at` (defaults to now). */
