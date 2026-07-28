@@ -19,6 +19,13 @@ const allowedRootDirs = new Set([
   "recordings",
   "scripts",
   "node_modules",
+  // Demo fixtures (e.g. the pre-recorded Derek consultation fallback take).
+  "demo-assets",
+  // Machine-local, git-ignored scratch (backups, retired experiments).
+  "local-only",
+  // Git-ignored outputs of the cost-estimation scripts in scripts/.
+  "cost-estimate-output",
+  "transcribe-cost-output",
 ])
 const allowedRootFiles = new Set([
   "package.json",

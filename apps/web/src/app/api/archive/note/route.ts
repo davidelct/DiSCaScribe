@@ -14,6 +14,8 @@ interface EncounterPayload {
   id: string
   patient_name?: string
   patient_id?: string
+  /** NHS number of the chart patient, recorded in metadata.json. */
+  patient_nhs_number?: string
   visit_reason?: string
   language?: string
   created_at?: string
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest) {
       encounter?: EncounterPayload
       note?: unknown
       note_version?: unknown
+      note_approved?: unknown
+      note_source?: unknown
       transcript?: unknown
     }
     try {
@@ -98,7 +102,11 @@ export async function POST(req: NextRequest) {
       // keyed off the same encounter.created_at — never the per-request time.
       createdAt: encounter.created_at || "",
       archivedAt,
-      patient: { name: encounter.patient_name || "", id: encounter.patient_id || "" },
+      patient: {
+        name: encounter.patient_name || "",
+        id: encounter.patient_id || "",
+        nhsNumber: typeof encounter.patient_nhs_number === "string" ? encounter.patient_nhs_number : undefined,
+      },
       visitReason: encounter.visit_reason || "",
       language: encounter.language || "en",
       recordingDurationSeconds: encounter.recording_duration,
@@ -109,7 +117,14 @@ export async function POST(req: NextRequest) {
       },
       note:
         typeof note === "string"
-          ? { text: note, model: NOTE_MODEL, format: "soap-markdown", version: noteVersion }
+          ? {
+              text: note,
+              model: NOTE_MODEL,
+              format: "soap-markdown",
+              version: noteVersion,
+              approved: body.note_approved === true,
+              source: typeof body.note_source === "string" ? body.note_source : undefined,
+            }
           : undefined,
       transcriptText,
     })

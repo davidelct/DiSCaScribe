@@ -1,4 +1,5 @@
 export * from "./types"
+export * from "./patients"
 export * from "./encounters"
 export * from "./secure-storage"
 export * from "./api-keys-client"

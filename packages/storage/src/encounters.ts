@@ -1,4 +1,4 @@
-import type { Encounter } from "./types"
+import type { Encounter, NoteVersion, NoteVersionSource } from "./types"
 import { loadSecureItem, saveSecureItem } from "./secure-storage"
 
 const STORAGE_KEY = "openscribe_encounters"
@@ -45,4 +45,48 @@ export function updateEncounter(encounters: Encounter[], id: string, updates: Pa
 
 export function deleteEncounter(encounters: Encounter[], id: string): Encounter[] {
   return encounters.filter((e) => e.id !== id)
+}
+
+/**
+ * The encounter's note trail. Encounters saved before note_versions existed
+ * carry only note_text/note_version; reconstruct a single-entry trail from
+ * those so the first new save extends it rather than losing history.
+ */
+export function noteVersionsOf(encounter: Encounter): NoteVersion[] {
+  if (encounter.note_versions?.length) return encounter.note_versions
+  if (!encounter.note_text?.trim()) return []
+  return [
+    {
+      version: encounter.note_version ?? 0,
+      source: (encounter.note_version ?? 0) > 0 ? "edited" : "generated",
+      note_text: encounter.note_text,
+      created_at: encounter.updated_at,
+    },
+  ]
+}
+
+/**
+ * Build the encounter updates that record `noteText` as the next version in
+ * the trail. Keeps note_text/note_version pointing at the newest version so
+ * every existing consumer (rendering, export, archival) is unaffected.
+ */
+export function appendNoteVersion(
+  encounter: Encounter,
+  source: NoteVersionSource,
+  noteText: string,
+): Partial<Encounter> {
+  const versions = noteVersionsOf(encounter)
+  const nextNumber = versions.length ? versions[versions.length - 1].version + 1 : 0
+  const entry: NoteVersion = {
+    version: nextNumber,
+    source,
+    note_text: noteText,
+    created_at: new Date().toISOString(),
+  }
+  return {
+    note_versions: [...versions, entry],
+    note_text: noteText,
+    note_version: nextNumber,
+    note_archive_status: "pending",
+  }
 }

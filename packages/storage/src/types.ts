@@ -9,6 +9,49 @@
  */
 export type EncounterMode = "scribed" | "recording_only"
 
+/**
+ * A patient on the practice record. The study cohort is a fixed set of
+ * simulated virtual patients (played by actors — no real PHI), seeded from
+ * the case material; see patients.ts. Field style mirrors Encounter
+ * (snake_case) rather than the retired DummyEPR's camelCase.
+ */
+export interface Patient {
+  id: string
+  /** Valid mod-11 NHS number in the 999-prefixed test range. */
+  nhs_number: string
+  given_name: string
+  family_name: string
+  /** ISO date (YYYY-MM-DD). */
+  date_of_birth: string
+  sex: "male" | "female"
+  address?: string
+  phone?: string
+  /** Active diagnoses / past medical history, one entry per problem. */
+  past_history: string[]
+  medications: string[]
+  allergies: string[]
+  social_history?: string
+  /** Free-text registration summary shown at the top of the chart. */
+  summary: string
+}
+
+/**
+ * A baseline historical observation on the chart (prior BP, weight, height).
+ * Deliberately baseline-only: presenting complaints, exam findings and
+ * investigation results are uncovered live during the consultation — the
+ * study measures that reasoning, so they must never be pre-seeded.
+ */
+export interface PatientObservation {
+  id: string
+  patient_id: string
+  /** ISO date the observation was taken. */
+  date: string
+  name: string
+  value: string
+  unit?: string
+  notes?: string
+}
+
 export type EncounterStatus =
   | "idle"
   | "recording"
@@ -17,9 +60,40 @@ export type EncounterStatus =
   | "note_generation_failed"
   | "completed"
 
+/** Where a note version came from. */
+export type NoteVersionSource =
+  /** v0 in scribed mode — the AI-generated note, untouched. */
+  | "generated"
+  /** v0 in recording-only mode — the clinician wrote the note themselves. */
+  | "manual"
+  /** A saved clinician edit. */
+  | "edited"
+  /** The version filed to the patient record by "Approve & file". */
+  | "approved"
+
+/**
+ * One immutable entry in a consultation's note trail. The full trail
+ * (generated v0 → edited vN → approved) is itself study data: it captures how
+ * much the clinician reshaped the AI draft before signing it.
+ */
+export interface NoteVersion {
+  version: number
+  source: NoteVersionSource
+  note_text: string
+  created_at: string
+}
+
+/**
+ * Whether the note has been signed into the patient record. Approving locks
+ * the consultation: the note can no longer be edited and the consultation
+ * appears in the patient's chart history as a filed entry.
+ */
+export type ApprovalStatus = "draft" | "approved"
+
 export interface Encounter {
   id: string
   patient_name: string
+  /** Id of the seeded Patient this consultation belongs to (see patients.ts). */
   patient_id: string
   visit_reason: string
   session_id?: string
@@ -39,6 +113,16 @@ export interface Encounter {
   note_version?: number
   /** Archive state of the current note version's copy in the storage backend. */
   note_archive_status?: NoteArchiveStatus
+  /**
+   * Full note trail, oldest first. Encounters from before this field existed
+   * have only note_text/note_version; appendNoteVersion() backfills a
+   * single-entry trail from those on the first new save.
+   */
+  note_versions?: NoteVersion[]
+  /** Absent means "draft" (or no note yet). */
+  approval_status?: ApprovalStatus
+  /** ISO 8601 timestamp of approval, set when the note is filed. */
+  approved_at?: string
   status: EncounterStatus
   mode?: EncounterMode
   language: string
@@ -78,6 +162,7 @@ export type AuditEventType =
   | "note.generation_started"
   | "note.generated"
   | "note.generation_failed"
+  | "note.approved"
   | "settings.api_key_configured"
   | "settings.preferences_updated"
   | "audit.exported"

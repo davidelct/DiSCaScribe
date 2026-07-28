@@ -192,16 +192,27 @@ export interface ArchiveNoteInput {
   sessionId: string
   createdAt: string
   archivedAt: string
-  patient: { name: string; id: string }
+  patient: { name: string; id: string; nhsNumber?: string }
   visitReason: string
   language: string
   recordingDurationSeconds?: number
   transcription: { provider: string; model: string; diarized: boolean }
   /**
-   * Absent for recording-only consultations, which generate no note.
-   * `version` 0 is the generated note; each saved user edit increments it.
+   * Absent for consultations that have no note yet.
+   * `version` 0 is the first note (generated, or written by the clinician in
+   * recording-only mode); each saved edit increments it. `approved` marks the
+   * version filed to the patient record — it is additionally written as
+   * note_approved.md so the filed note is unambiguous in the container.
    */
-  note?: { text: string; model: string; format: string; version: number }
+  note?: {
+    text: string
+    model: string
+    format: string
+    version: number
+    approved?: boolean
+    /** Provenance of this version: generated | manual | edited | approved. */
+    source?: string
+  }
   /** Used only to backfill transcript.txt if phase 1 did not write it. */
   transcriptText: string
 }
@@ -250,6 +261,15 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
       "text/markdown; charset=utf-8",
       existing.get(noteName)?.id,
     )
+    if (input.note.approved) {
+      files["note_approved.md"] = await client.uploadFile(
+        containerId,
+        "note_approved.md",
+        Buffer.from(input.note.text, "utf8"),
+        "text/markdown; charset=utf-8",
+        existing.get("note_approved.md")?.id,
+      )
+    }
   }
 
   // Backfill the transcript if phase 1 never wrote it (it failed, or this
@@ -275,13 +295,19 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     sessionId: input.sessionId,
     createdAt: input.createdAt,
     archivedAt: input.archivedAt,
-    patient: { name: input.patient.name, id: input.patient.id },
+    patient: { name: input.patient.name, id: input.patient.id, nhsNumber: input.patient.nhsNumber ?? null },
     visitReason: input.visitReason,
     language: input.language,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
     transcription: input.transcription,
     note: input.note
-      ? { model: input.note.model, format: input.note.format, version: input.note.version }
+      ? {
+          model: input.note.model,
+          format: input.note.format,
+          version: input.note.version,
+          approved: Boolean(input.note.approved),
+          source: input.note.source ?? null,
+        }
       : null,
     files: {
       audio: audioName,
@@ -289,6 +315,7 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
       rawTranscript: present.has("raw_transcript.json") ? "raw_transcript.json" : null,
       note: latestNote,
       noteVersions,
+      noteApproved: present.has("note_approved.md") ? "note_approved.md" : null,
       metadata: "metadata.json",
     },
   }
