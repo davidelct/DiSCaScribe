@@ -1,4 +1,5 @@
 export { ErrorBoundary } from "./components/error-boundary"
+export { MicTest } from "./components/mic-test"
 export { PermissionsDialog } from "./components/permissions-dialog"
 export { SettingsDialog } from "./components/settings-dialog"
 export { useEncounters } from "./hooks/use-encounters"

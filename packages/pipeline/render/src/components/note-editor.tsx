@@ -8,8 +8,6 @@ import { Textarea } from "@ui/lib/ui/textarea"
 import { Badge } from "@ui/lib/ui/badge"
 import {
   Save,
-  Copy,
-  Download,
   Check,
   Loader2,
   Pencil,
@@ -25,7 +23,7 @@ import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
-import { parseNoteSections, markdownToPlainText, type NoteSection } from "../note-sections"
+import { parseNoteSections, type NoteSection } from "../note-sections"
 import { StimulatedRecallView } from "./stimulated-recall-view"
 
 export type CaptureStepStatus = "pending" | "in-progress" | "done" | "failed"
@@ -60,6 +58,8 @@ interface NoteEditorProps {
   /** File this note to the patient record; the consultation locks after. */
   onApprove: (noteText: string) => void
   live?: LiveCaptureState
+  /** Navigation element rendered before the patient name (back to chart). */
+  backLink?: ReactNode
 }
 
 type TabType = "capture" | "note" | "recall"
@@ -88,46 +88,8 @@ function emptySoapSections(): NoteSection[] {
 }
 
 /**
- * One SOAP section with its own copy button, copying the section body as
- * plain text (markdown markers stripped).
- */
-function CopyableSection({ title, body }: { title: string; body: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(markdownToPlainText(body))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  return (
-    <section>
-      <div className="mb-3 flex items-end justify-between gap-3 border-b border-border pb-2">
-        <h2 className="font-display text-xl font-medium tracking-tight text-foreground">{title}</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleCopy}
-          disabled={!body.trim()}
-          title={`Copy ${title} as plain text`}
-          className="h-7 shrink-0 rounded-full px-2.5 text-muted-foreground hover:text-foreground"
-        >
-          {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
-          <span className="text-xs">{copied ? "Copied" : "Copy"}</span>
-        </Button>
-      </div>
-      {body.trim() ? (
-        <MarkdownNote source={body} className="[&>*:first-child]:mt-0" />
-      ) : (
-        <p className="my-3 text-sm italic text-muted-foreground">Empty</p>
-      )}
-    </section>
-  )
-}
-
-/**
- * Renders the note with a copy button per level-2 (SOAP) section. Falls back
- * to plain whole-note rendering when the note has no sections.
+ * Renders the note as its level-2 (SOAP) sections. Falls back to plain
+ * whole-note rendering when the note has no sections.
  */
 function SectionedNote({ source }: { source: string }) {
   const { preamble, sections } = parseNoteSections(source)
@@ -140,7 +102,16 @@ function SectionedNote({ source }: { source: string }) {
     <div className="[&>*+*]:mt-8">
       {preamble && <MarkdownNote source={preamble} className="[&>*:first-child]:mt-0" />}
       {sections.map((section) => (
-        <CopyableSection key={section.title} title={section.title} body={section.body} />
+        <section key={section.title}>
+          <h2 className="mb-3 border-b border-border pb-2 font-display text-xl font-medium tracking-tight text-foreground">
+            {section.title}
+          </h2>
+          {section.body.trim() ? (
+            <MarkdownNote source={section.body} className="[&>*:first-child]:mt-0" />
+          ) : (
+            <p className="my-3 text-sm italic text-muted-foreground">Empty</p>
+          )}
+        </section>
       ))}
     </div>
   )
@@ -167,7 +138,7 @@ function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () =
   )
 }
 
-export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorProps) {
+export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: NoteEditorProps) {
   const recordingOnly = encounter.mode === "recording_only"
   const approved = encounter.approval_status === "approved"
   const hasNote = Boolean(encounter.note_text?.trim())
@@ -184,13 +155,9 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
   const [editSections, setEditSections] = useState<NoteSection[] | null>(null)
   const [editPreamble, setEditPreamble] = useState("")
   const [hasChanges, setHasChanges] = useState(false)
-  const [copied, setCopied] = useState(false)
   // Read-only view of an older version from the trail; null = current note.
   const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null)
   const [showHistory, setShowHistory] = useState(false)
-  // Approve is a two-click action: the first click arms it, the second files.
-  const [confirmingApprove, setConfirmingApprove] = useState(false)
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNoteRef = useRef<string>(encounter.note_text || "")
 
   // Reset the view when switching encounters.
@@ -200,7 +167,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
     setEditSections(null)
     setViewingVersion(null)
     setShowHistory(false)
-    setConfirmingApprove(false)
     setActiveTab(encounter.note_text?.trim() ? "note" : "capture")
     prevNoteRef.current = encounter.note_text || ""
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,12 +185,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
     }
     prevNoteRef.current = encounter.note_text || ""
   }, [encounter.note_text])
-
-  useEffect(() => {
-    return () => {
-      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-    }
-  }, [])
 
   // Sequential enablement: the note tab opens once the note exists, or — for
   // writing one manually (recording-only arm, or a failed generation) — once
@@ -300,40 +260,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
     setNoteMode("preview")
   }
 
-  const handleApproveClick = () => {
-    if (!confirmingApprove) {
-      setConfirmingApprove(true)
-      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-      confirmTimerRef.current = setTimeout(() => setConfirmingApprove(false), 8000)
-      return
-    }
-    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-    setConfirmingApprove(false)
-    onApprove(noteMarkdown)
-  }
-
   const displayedNote = viewingVersion ? viewingVersion.note_text : noteMarkdown
-
-  const handleCopy = async () => {
-    const textToCopy = activeTab === "note" ? displayedNote : encounter.transcript_text
-    await navigator.clipboard.writeText(textToCopy)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  const handleExport = () => {
-    const isNote = activeTab === "note"
-    const content = isNote ? displayedNote : encounter.transcript_text
-    const blob = new Blob([content], { type: isNote ? "text/markdown" : "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    const suffix = isNote ? "note" : "transcript"
-    const extension = isNote ? "md" : "txt"
-    a.download = `${encounter.patient_name || "encounter"}_${suffix}_${format(new Date(encounter.created_at), "yyyy-MM-dd")}.${extension}`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
   // The tabs are the pipeline: each step's live status is shown on its tab.
   const tabButton = (tab: TabType, label: string, enabled: boolean, status?: ReactNode) => (
@@ -371,18 +298,17 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
       <X className="h-3.5 w-3.5 text-destructive" />
     ) : null
 
-  const showCopyExport =
-    (activeTab === "capture" && hasTranscript) || (activeTab === "note" && hasNote && noteMode === "preview")
 
   const showEditingActions = activeTab === "note" && noteMode === "edit"
   const showPreviewActions = activeTab === "note" && hasNote && noteMode === "preview" && !approved && !viewingVersion
 
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 bg-card/60 px-8 pt-3 backdrop-blur-sm">
-        {/* Single compact row: identity on the left. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <h2 className="font-display truncate text-lg font-medium tracking-tight text-foreground">
+      <div className="shrink-0 bg-card/60 px-6 pt-2 backdrop-blur-sm">
+        {/* Single compact row: back navigation + identity on the left. */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          {backLink}
+          <h2 className="font-display truncate text-base font-medium tracking-tight text-foreground">
             {encounter.patient_name || "Unknown Patient"}
           </h2>
           {(patient || encounter.patient_id) && (
@@ -411,7 +337,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
           </div>
         </div>
 
-        <div className="mt-1.5 flex items-center justify-between gap-4 border-b border-border">
+        <div className="mt-1 flex items-center justify-between gap-4 border-b border-border">
           <div className="flex gap-1">
             {tabButton("capture", "Capture", true, captureStatus)}
             {tabButton("note", "Clinical Note", noteEnabled, noteStatus)}
@@ -491,17 +417,12 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleApproveClick}
+                  onClick={() => onApprove(noteMarkdown)}
                   title="File this note to the patient record. The consultation locks after approval."
-                  className={cn(
-                    "mr-1 h-8 rounded-full px-3 shadow-soft",
-                    confirmingApprove
-                      ? "bg-success text-success-foreground hover:bg-success"
-                      : "bg-primary text-primary-foreground hover:bg-brand-strong",
-                  )}
+                  className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
                 >
                   <FileCheck className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">{confirmingApprove ? "Confirm — file to record" : "Approve & file"}</span>
+                  <span className="text-xs">Approve & file</span>
                 </Button>
               </>
             )}
@@ -529,34 +450,12 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
                 </Button>
               </>
             )}
-            {showCopyExport && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleCopy}
-                  className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                >
-                  {copied ? <Check className="h-4 w-4 mr-1.5" /> : <Copy className="h-4 w-4 mr-1.5" />}
-                  <span className="text-xs">Copy</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleExport}
-                  className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                >
-                  <Download className="h-4 w-4 mr-1.5" />
-                  <span className="text-xs">Export</span>
-                </Button>
-              </>
-            )}
           </div>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("mx-auto w-full px-8 py-6", activeTab === "recall" ? "max-w-6xl" : "max-w-3xl")}>
+        <div className={cn("mx-auto w-full px-6 py-4", activeTab === "recall" ? "max-w-6xl" : "max-w-3xl")}>
           {/* Panels stay mounted and hide via CSS, so the audio player (and its
               playback position) survives tab switches without remount flicker. */}
           <div className={cn("flex flex-col gap-4", activeTab !== "capture" && "hidden")}>
@@ -662,7 +561,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
                   />
                 )
               ) : hasNote ? (
-                <div className="min-h-[640px] rounded-2xl border border-border bg-card p-8 shadow-soft sm:p-10">
+                <div className="min-h-[640px] rounded-2xl border border-border bg-card p-6 shadow-soft sm:p-8">
                   <SectionedNote source={displayedNote} />
                 </div>
               ) : (

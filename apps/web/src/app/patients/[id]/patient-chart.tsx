@@ -8,7 +8,7 @@
  * findings surface during consultations, never here (study integrity).
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
@@ -21,13 +21,15 @@ import {
   Pill,
   ShieldAlert,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { Input } from "@ui/lib/ui/input"
 import { Label } from "@ui/lib/ui/label"
-import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
+import { ErrorBoundary, MicTest, useEncounters, useHttpsWarning } from "@ui"
+import { setConsultationIntent, type ConsultationIntent } from "@/lib/consultation-intent"
 import { cn } from "@ui/lib/utils"
 import {
   deleteEncounterAudio,
@@ -38,7 +40,7 @@ import {
   patientAge,
   patientFullName,
 } from "@storage"
-import type { Encounter, EncounterMode, Patient } from "@storage/types"
+import type { Encounter, Patient } from "@storage/types"
 import { TopBar } from "../../top-bar"
 
 /** Chart-facing lifecycle label for one consultation. */
@@ -91,35 +93,28 @@ function SummaryBlock({
 }
 
 /**
- * Mode picker + optional reason, shown before a consultation starts. The mode
- * is the study arm: scribed (AI note) vs recording-only (control, clinician
- * writes the note). Defaults to the settings-level preference.
+ * Everything needed to launch a consultation in one dialog: a live microphone
+ * check, the reason for visit, and the two ways in — record now, or transcribe
+ * an uploaded file. The capture mode (study arm) is deliberately NOT chosen
+ * here: it comes from Settings and is only displayed, so the arm can't be
+ * flipped casually per consultation.
  */
 function StartConsultationDialog({
   patient,
+  starting,
   onCancel,
-  onStart,
+  onRecord,
+  onUpload,
 }: {
   patient: Patient
+  starting: boolean
   onCancel: () => void
-  onStart: (mode: EncounterMode, visitReason: string) => void
+  onRecord: (visitReason: string) => void
+  onUpload: (visitReason: string, file: File) => void
 }) {
-  const [mode, setMode] = useState<EncounterMode>(() => getPreferences().encounterMode || "scribed")
   const [visitReason, setVisitReason] = useState("")
-
-  const modeCard = (value: EncounterMode, title: string, description: string, accent: string) => (
-    <button
-      type="button"
-      onClick={() => setMode(value)}
-      className={cn(
-        "flex-1 rounded-2xl border p-4 text-left transition-all",
-        mode === value ? cn("shadow-soft", accent) : "border-border bg-background hover:border-primary/30",
-      )}
-    >
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
-    </button>
-  )
+  const [preferredDeviceId] = useState(() => getPreferences().preferredInputDeviceId || "")
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-foreground/20 p-4 backdrop-blur-sm">
@@ -140,24 +135,8 @@ function StartConsultationDialog({
           </Button>
         </div>
 
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Capture mode</Label>
-            <div className="flex gap-3">
-              {modeCard(
-                "scribed",
-                "Scribed",
-                "Record and transcribe the consultation; the scribe drafts the clinical note for review.",
-                "border-primary/50 bg-brand-soft/60",
-              )}
-              {modeCard(
-                "recording_only",
-                "Recording only",
-                "Record and transcribe only — you write the clinical note yourself.",
-                "border-success/50 bg-success/10",
-              )}
-            </div>
-          </div>
+        <div className="space-y-4">
+          <MicTest preferredDeviceId={preferredDeviceId} />
 
           <div className="space-y-2">
             <Label
@@ -179,18 +158,50 @@ function StartConsultationDialog({
             <Button
               variant="ghost"
               onClick={onCancel}
+              disabled={starting}
               className="flex-1 rounded-full text-muted-foreground hover:text-foreground"
             >
               Cancel
             </Button>
             <Button
-              onClick={() => onStart(mode, visitReason)}
-              className="flex-1 rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
+              onClick={() => onRecord(visitReason)}
+              disabled={starting}
+              className="flex-[2] rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
             >
               <Mic className="mr-2 h-4 w-4" />
-              Open consultation
+              Start recording
             </Button>
           </div>
+
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ""
+              if (file) onUpload(visitReason, file)
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={starting}
+            className="w-full rounded-full"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Upload audio file
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            Transcribe an existing recording (WAV, MP3, M4A…).
+          </p>
         </div>
       </div>
     </div>
@@ -226,7 +237,9 @@ function PatientChartContent({ patientId }: { patientId: string }) {
     .filter((e: Encounter) => e.patient_id === patient.id)
     .sort((a: Encounter, b: Encounter) => b.created_at.localeCompare(a.created_at))
 
-  const handleStart = async (mode: EncounterMode, visitReason: string) => {
+  // Create the encounter (mode comes from Settings), stash the launch intent
+  // for the workspace to dispatch on mount, and navigate in.
+  const launchConsultation = async (visitReason: string, intent: ConsultationIntent) => {
     if (starting) return
     setStarting(true)
     try {
@@ -236,8 +249,9 @@ function PatientChartContent({ patientId }: { patientId: string }) {
         visit_reason: visitReason.trim() || "GP consultation",
         status: "idle",
         transcript_text: "",
-        mode,
+        mode: getPreferences().encounterMode || "scribed",
       })
+      setConsultationIntent(encounter.id, intent)
       router.push(`/consultations/${encounter.id}`)
     } finally {
       setStarting(false)
@@ -261,8 +275,10 @@ function PatientChartContent({ patientId }: { patientId: string }) {
       {showStartDialog && (
         <StartConsultationDialog
           patient={patient}
+          starting={starting}
           onCancel={() => setShowStartDialog(false)}
-          onStart={(mode, reason) => void handleStart(mode, reason)}
+          onRecord={(reason) => void launchConsultation(reason, { action: "record" })}
+          onUpload={(reason, file) => void launchConsultation(reason, { action: "upload", file })}
         />
       )}
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">

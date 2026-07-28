@@ -29,11 +29,11 @@ import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
 import { useSegmentUpload, type UploadError } from "@transcription"
 import { generateClinicalNote } from "@/app/actions"
+import { takeConsultationIntent } from "@/lib/consultation-intent"
 import {
   appendNoteVersion,
   noteVersionsOf,
   getPatient,
-  formatNhsNumber,
   getPreferences,
   debugLog,
   debugLogPHI,
@@ -931,6 +931,24 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     }
   }
 
+  // Dispatch the launch intent chosen in the chart's start dialog (record now,
+  // or transcribe an uploaded file) once the encounter has loaded. The intent
+  // store is module memory: after a hard refresh there is none and the ready
+  // panel takes over.
+  const intentDispatchedRef = useRef(false)
+  useEffect(() => {
+    if (!encounter || intentDispatchedRef.current) return
+    const intent = takeConsultationIntent(encounter.id)
+    if (!intent) return
+    intentDispatchedRef.current = true
+    if (intent.action === "record") {
+      void handleStartRecording()
+    } else {
+      void handleUploadRecording(intent.file)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encounter?.id])
+
   const handleStopRecording = async () => {
     if (!encounter) return
 
@@ -1087,29 +1105,40 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         <PermissionsDialog onComplete={handlePermissionsComplete} preferredInputDeviceId={preferredInputDeviceId} />
       )}
       <TopBar />
-      <div className="shrink-0 border-b border-border bg-card/50 px-8 py-2">
-        <Link
-          href={patient ? `/patients/${patient.id}` : "/"}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {patient ? `${encounter.patient_name}'s chart` : "Patients"}
-          {patient && (
-            <span className="ml-2 font-mono text-[0.65rem] text-muted-foreground/70">
-              NHS {formatNhsNumber(patient.nhs_number)}
-            </span>
-          )}
-        </Link>
-      </div>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {showReady ? (
-          <ReadyPanel
-            encounter={encounter}
-            onRecord={() => void handleStartRecording()}
-            onUpload={(file) => void handleUploadRecording(file)}
-          />
+          <>
+            <div className="shrink-0 border-b border-border bg-card/50 px-8 py-2">
+              <Link
+                href={patient ? `/patients/${patient.id}` : "/"}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                {patient ? `${encounter.patient_name}'s chart` : "Patients"}
+              </Link>
+            </div>
+            <ReadyPanel
+              encounter={encounter}
+              onRecord={() => void handleStartRecording()}
+              onUpload={(file) => void handleUploadRecording(file)}
+            />
+          </>
         ) : (
-          <NoteEditor encounter={encounter} onSave={handleSaveNote} onApprove={handleApproveNote} live={liveState} />
+          <NoteEditor
+            encounter={encounter}
+            onSave={handleSaveNote}
+            onApprove={handleApproveNote}
+            live={liveState}
+            backLink={
+              <Link
+                href={patient ? `/patients/${patient.id}` : "/"}
+                title={patient ? `Back to ${encounter.patient_name}'s chart` : "Back to patients"}
+                className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            }
+          />
         )}
       </main>
     </div>
