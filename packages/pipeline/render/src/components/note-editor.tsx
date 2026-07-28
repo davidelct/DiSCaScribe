@@ -304,7 +304,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live }: NoteEditorPro
     if (!confirmingApprove) {
       setConfirmingApprove(true)
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-      confirmTimerRef.current = setTimeout(() => setConfirmingApprove(false), 4000)
+      confirmTimerRef.current = setTimeout(() => setConfirmingApprove(false), 8000)
       return
     }
     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)

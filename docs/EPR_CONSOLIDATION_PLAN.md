@@ -1,5 +1,19 @@
 # One App: DiSCaScribe → integrated EPR + scribe
 
+> **Status (27 Jul 2026): IMPLEMENTED** on branch `epr-consolidation`, all in one
+> pass per the team decisions: D1(a) browser-local persistence, D2 full version
+> trail (v0 → vN → approved), D3 real routing, D4 control-arm manual note entry,
+> D5 skipped, D6 baseline-only charts, D7 deferred. Verified end-to-end in the
+> browser (upload → Deepgram → note editor → approve & file → chart → Box).
+> Pre-demo checklist:
+> - **Set `ANTHROPIC_API_KEY` in `apps/web/.env.local`** — it is currently
+>   empty, so local note *generation* fails (transcription works; the manual
+>   note fallback covers it, but the demo wants the AI draft).
+> - Pre-existing uncommitted files live on branch `stash/pre-epr-2026-07-27`.
+> - DummyEPR is retired; its `data/` is backed up on the stash branch under
+>   `local-only/dummyepr-data-backup-2026-07-27/` and seeded into
+>   `packages/storage/src/patients.ts`.
+
 **Goal.** Retire DummyEPR and grow DiSCaScribe into a single app that simulates what
 clinicians actually use today: an EPR with an integrated scribe. Patient list → chart →
 start consultation → record → generate note → edit → approve/file → stimulated recall.
