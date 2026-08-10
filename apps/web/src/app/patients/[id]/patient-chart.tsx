@@ -65,14 +65,20 @@ function SummaryBlock({
   icon,
   items,
   empty,
+  delayMs = 0,
 }: {
   title: string
   icon: React.ReactNode
   items: string[]
   empty: string
+  /** Stagger against the other chart cards, so the record assembles in order. */
+  delayMs?: number
 }) {
   return (
-    <section className="rounded-2xl border border-border bg-card p-5 shadow-soft surface">
+    <section
+      className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
+      style={{ animationDelay: `${delayMs}ms` }}
+    >
       <h2 className="mb-3 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
         {icon}
         {title}
@@ -330,23 +336,29 @@ function PatientChartContent({ patientId }: { patientId: string }) {
           <div className="space-y-4">
             <SummaryBlock
               title="Active problems"
+              delayMs={60}
               icon={<AlertCircle className="h-3.5 w-3.5" />}
               items={patient.past_history}
               empty="No active problems recorded."
             />
             <SummaryBlock
               title="Medications"
+              delayMs={110}
               icon={<Pill className="h-3.5 w-3.5" />}
               items={patient.medications}
               empty="No regular medications."
             />
             <SummaryBlock
               title="Allergies"
+              delayMs={160}
               icon={<ShieldAlert className="h-3.5 w-3.5" />}
               items={patient.allergies}
               empty="None recorded."
             />
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-soft surface">
+            <section
+              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
+              style={{ animationDelay: "210ms" }}
+            >
               <h2 className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                 Social history
               </h2>
@@ -358,7 +370,10 @@ function PatientChartContent({ patientId }: { patientId: string }) {
 
           {/* Right rail: consultations + observations */}
           <div className="space-y-4">
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-soft surface">
+            <section
+              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
+              style={{ animationDelay: "90ms" }}
+            >
               <h2 className="mb-3 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                 <ClipboardList className="h-3.5 w-3.5" />
                 Consultations
@@ -425,7 +440,10 @@ function PatientChartContent({ patientId }: { patientId: string }) {
               )}
             </section>
 
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-soft surface">
+            <section
+              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
+              style={{ animationDelay: "140ms" }}
+            >
               <h2 className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
                 Observations
               </h2>

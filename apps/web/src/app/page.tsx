@@ -118,15 +118,18 @@ function PatientRegister() {
           </div>
         )}
 
-        <div className="animate-fade-up space-y-3">
-          {patients.map((patient) => {
+        <div className="space-y-3">
+          {patients.map((patient, index) => {
             const consults = consultationsFor(patient.id)
             const lastConsult = consults[0]
             return (
               <Link
                 key={patient.id}
                 href={`/patients/${patient.id}`}
-                className="group flex items-center gap-5 rounded-2xl border border-border bg-card p-5 shadow-soft surface transition-all hover:border-primary/30 hover:shadow-lifted"
+                // Staggered so the register reads top-to-bottom on arrival, and
+                // so a filtered-in row announces itself rather than blinking in.
+                style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+                className="group animate-rise flex items-center gap-5 rounded-2xl border border-border bg-card p-5 shadow-soft surface transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lifted"
               >
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-soft font-display text-base font-medium text-primary">
                   {patient.given_name[0]}

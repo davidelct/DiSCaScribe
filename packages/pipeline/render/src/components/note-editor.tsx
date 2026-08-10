@@ -21,6 +21,7 @@ import { format } from "date-fns"
 import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
+import { TranscriptSkeleton } from "./transcript-skeleton"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
 import { parseNoteSections, type NoteSection } from "../note-sections"
@@ -490,18 +491,22 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                 />
               )}
               {hasTranscript ? (
+                // No wrapper animation: the turns animate themselves, and
+                // fading the whole block at once flattens their stagger.
                 <TranscriptView
                   text={encounter.transcript_text}
                   confidence={encounter.transcript_confidence}
                 />
+              ) : live?.phase === "processing" ? (
+                // Hold the transcript's shape while it is on its way, so its
+                // arrival is a crossfade rather than a jump from centred text.
+                <TranscriptSkeleton />
               ) : (
                 <div className="flex h-full min-h-[380px] items-center justify-center text-center">
                   <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-balance">
                     {live?.phase === "recording"
                       ? "The transcript will appear here once you stop the recording."
-                      : live?.phase === "processing"
-                        ? "Transcribing the consultation…"
-                        : "No transcript available."}
+                      : "No transcript available."}
                   </p>
                 </div>
               )}
