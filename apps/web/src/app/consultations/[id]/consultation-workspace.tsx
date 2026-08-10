@@ -27,7 +27,7 @@ import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
-import { useSegmentUpload, type UploadError } from "@transcription"
+import { formatKeyterms, resolveKeyterms, useSegmentUpload, type UploadError } from "@transcription"
 import { generateClinicalNote } from "@/app/actions"
 import { takeConsultationIntent } from "@/lib/consultation-intent"
 import {
@@ -87,6 +87,8 @@ interface ArchivePayload {
   /** Provenance of this note version: generated | manual | edited | approved. */
   note_source?: string
   transcript: string
+  /** Keyterm vocabulary applied to this consultation, newline-separated. */
+  keyterms: string
 }
 
 interface ArchiveResponse {
@@ -447,6 +449,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             note_approved: note !== undefined ? Boolean(noteApproved) : undefined,
             note_source: note !== undefined ? noteSource : undefined,
             transcript,
+            keyterms: formatKeyterms(resolveKeyterms(getPreferences().keytermsOverride)),
           })
           if (data.skipped) {
             await updateEncounterRef.current(encounterId, { archive_status: "skipped", ...noteStatus("skipped") })
@@ -750,6 +753,9 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         // transcript) under the same per-consult container the note upload uses.
         if (encId) formData.append("encounter_id", encId)
         if (createdAt) formData.append("created_at", createdAt)
+        // Keyterm vocabulary is a client-side setting, so it rides with the
+        // request rather than being read from server config.
+        formData.append("keyterms", formatKeyterms(resolveKeyterms(getPreferences().keytermsOverride)))
         const baseUrl = apiBaseUrlRef.current
         const url = baseUrl
           ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
@@ -831,6 +837,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
           formData.append("file", file, file.name || `${activeSessionId}-upload`)
           if (encId) formData.append("encounter_id", encId)
           if (createdAt) formData.append("created_at", createdAt)
+          formData.append("keyterms", formatKeyterms(resolveKeyterms(getPreferences().keytermsOverride)))
           // BYOK sessions supply their own Deepgram key with each request.
           const byokKeys = await loadByokApiKeys()
           response = await fetch(url, {

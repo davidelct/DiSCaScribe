@@ -21,6 +21,8 @@ export function TopBar() {
   const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
   const [defaultMode, setDefaultMode] = useState<EncounterMode>("scribed")
+  // undefined = the committed default vocabulary is in use.
+  const [keytermsOverride, setKeytermsOverride] = useState<string[] | undefined>(undefined)
   const [micPermissionStatus, setMicPermissionStatus] = useState("unknown")
   const [micReadinessMessage, setMicReadinessMessage] = useState("")
   const [lastFailureCode, setLastFailureCode] = useState("")
@@ -29,6 +31,7 @@ export function TopBar() {
     const prefs = getPreferences()
     setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
     setDefaultMode(prefs.encounterMode || "scribed")
+    setKeytermsOverride(prefs.keytermsOverride)
     // The top bar is on every page, so this runs once per page load:
     // cleans up expired audit entries and schedules periodic cleanup.
     void initializeAuditLog()
@@ -88,6 +91,12 @@ export function TopBar() {
     void setPreferences({ encounterMode: value })
   }, [])
 
+  const handleKeytermsOverrideChange = useCallback((terms: string[] | undefined) => {
+    setKeytermsOverride(terms)
+    // undefined clears the stored key, so the committed default applies again.
+    void setPreferences({ keytermsOverride: terms })
+  }, [])
+
   return (
     <>
       <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-card/70 backdrop-blur-sm">
@@ -130,6 +139,8 @@ export function TopBar() {
         onPreferredInputDeviceChange={handlePreferredInputDeviceChange}
         encounterMode={defaultMode}
         onEncounterModeChange={handleDefaultModeChange}
+        keytermsOverride={keytermsOverride}
+        onKeytermsOverrideChange={handleKeytermsOverrideChange}
         micPermissionStatus={micPermissionStatus}
         lastMicReadinessMessage={micReadinessMessage}
         lastMicReadinessMetrics={null}

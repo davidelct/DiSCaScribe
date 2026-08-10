@@ -24,6 +24,8 @@ export interface TranscriptionRequestOptions {
   contentType?: string
   /** Caller-supplied Deepgram key (BYOK sessions); falls back to the env key. */
   apiKey?: string
+  /** Keyterm Prompting vocabulary applied to this request. */
+  keyterms?: readonly string[]
 }
 
 const DEFAULT_DEEPGRAM_MODEL = "nova-3"
@@ -47,6 +49,7 @@ export async function transcribeWithResolvedProvider(
     diarize: options.diarize,
     contentType: options.contentType,
     apiKey: options.apiKey,
+    keyterms: options.keyterms,
   })
 }
 
@@ -74,5 +77,6 @@ export async function transcribeWithResolvedProviderDetailed(
     diarize: options.diarize,
     contentType: options.contentType,
     apiKey: options.apiKey,
+    keyterms: options.keyterms,
   })
 }

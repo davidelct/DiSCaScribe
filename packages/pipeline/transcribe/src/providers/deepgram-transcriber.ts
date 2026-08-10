@@ -27,6 +27,11 @@ export interface DeepgramTranscriberOptions {
   baseUrl?: string
   /** MIME type of the audio bytes (e.g. "audio/wav", "audio/mpeg"). Deepgram also auto-detects. */
   contentType?: string
+  /**
+   * Keyterm Prompting vocabulary (Nova-3 only). Sent as one repeated `keyterm`
+   * param per term; multi-word terms are URL-encoded by URLSearchParams.
+   */
+  keyterms?: readonly string[]
   timeoutMs?: number
   maxRetries?: number
   fetchFn?: typeof fetch
@@ -272,6 +277,11 @@ async function requestDeepgram(
   if (diarize) {
     url.searchParams.set("diarize", "true")
     url.searchParams.set("utterances", "true")
+  }
+  // Repeated rather than delimited, so each term is processed individually.
+  for (const term of options?.keyterms ?? []) {
+    const trimmed = term.trim()
+    if (trimmed) url.searchParams.append("keyterm", trimmed)
   }
 
   const totalAttempts = maxRetries + 1

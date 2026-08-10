@@ -3,6 +3,19 @@ export type { WavInfo } from "./core/wav"
 export { useSegmentUpload } from "./hooks/use-segment-upload"
 export type { PendingSegment, UploadError } from "./hooks/use-segment-upload"
 
+// Keyterm Prompting vocabulary (Nova-3).
+export {
+  DEFAULT_KEYTERMS,
+  KEYTERM_TOKEN_BUDGET,
+  KEYTERM_TOKEN_LIMIT,
+  estimateKeytermTokens,
+  formatKeyterms,
+  parseKeyterms,
+  resolveKeyterms,
+  validateKeyterms,
+  type KeytermValidation,
+} from "./keyterms"
+
 // Word-level confidence, as offsets into the rendered transcript.
 export {
   DEFAULT_LOW_CONFIDENCE_THRESHOLD,

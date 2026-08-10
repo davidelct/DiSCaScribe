@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { resolveTranscriptionProvider } from "@transcription"
+import { parseKeyterms, resolveTranscriptionProvider } from "@transcription"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveNoteAndMetadata, getArchivalConfig } from "@/lib/archival"
 import { requestSessionRole } from "@/lib/request-keys"
@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
       note_approved?: unknown
       note_source?: unknown
       transcript?: unknown
+      /** Keyterm vocabulary applied to this consultation, newline-separated. */
+      keyterms?: unknown
     }
     try {
       body = (await req.json()) as typeof body
@@ -114,6 +116,7 @@ export async function POST(req: NextRequest) {
         provider: resolvedProvider.provider,
         model: resolvedProvider.model,
         diarized: true,
+        keyterms: parseKeyterms(typeof body.keyterms === "string" ? body.keyterms : ""),
       },
       note:
         typeof note === "string"

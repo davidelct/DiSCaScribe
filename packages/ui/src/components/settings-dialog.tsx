@@ -9,6 +9,7 @@ import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from 
 import { loadByokApiKeys, saveByokApiKeys } from "@storage/api-keys-client"
 import type { EncounterMode } from "@storage/types"
 import { AuditLogViewer } from "./audit-log-viewer"
+import { KeytermEditor } from "./keyterm-editor"
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -18,6 +19,9 @@ interface SettingsDialogProps {
   onPreferredInputDeviceChange: (value: string) => void
   encounterMode: EncounterMode
   onEncounterModeChange: (value: EncounterMode) => void
+  /** Keyterm override; absent means the committed default list is in use. */
+  keytermsOverride?: string[]
+  onKeytermsOverrideChange: (terms: string[] | undefined) => void
   micPermissionStatus?: string
   lastMicReadinessMessage?: string
   lastMicReadinessMetrics?: { rms: number; peak: number } | null
@@ -33,6 +37,8 @@ export function SettingsDialog({
   onPreferredInputDeviceChange,
   encounterMode,
   onEncounterModeChange,
+  keytermsOverride,
+  onKeytermsOverrideChange,
   micPermissionStatus,
   lastMicReadinessMessage,
   lastMicReadinessMetrics,
@@ -200,6 +206,11 @@ export function SettingsDialog({
               </p>
             </div>
           </div>
+
+          {/* Divider */}
+          <div className="border-t border-border" />
+
+          <KeytermEditor value={keytermsOverride} onChange={onKeytermsOverrideChange} />
 
           {/* Divider */}
           <div className="border-t border-border" />

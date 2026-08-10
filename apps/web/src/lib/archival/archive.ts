@@ -196,7 +196,17 @@ export interface ArchiveNoteInput {
   visitReason: string
   language: string
   recordingDurationSeconds?: number
-  transcription: { provider: string; model: string; diarized: boolean }
+  transcription: {
+    provider: string
+    model: string
+    diarized: boolean
+    /**
+     * Keyterm vocabulary actually applied to this recording. Recorded per
+     * consultation because it is a client-side setting: without this there is
+     * no way, afterwards, to tell which vocabulary shaped which transcript.
+     */
+    keyterms?: string[]
+  }
   /**
    * Absent for consultations that have no note yet.
    * `version` 0 is the first note (generated, or written by the clinician in

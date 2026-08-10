@@ -482,3 +482,57 @@ test("a non-diarized response still yields word spans", async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test("keyterms are sent as repeated keyterm params, URL-encoded", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  let capturedUrl = ""
+  globalThis.fetch = (async (url) => {
+    capturedUrl = String(url)
+    return new Response(
+      JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: "ok" }] }] } }),
+      { status: 200 },
+    )
+  }) as typeof fetch
+
+  try {
+    await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav", {
+      keyterms: ["amoxicillin", "blood pressure", "  ", "chest X-ray"],
+    })
+
+    const params = new URL(capturedUrl).searchParams
+    // Repeated rather than delimited, so each term is processed individually,
+    // and the blank entry is dropped rather than sent as an empty keyterm.
+    assert.deepEqual(params.getAll("keyterm"), ["amoxicillin", "blood pressure", "chest X-ray"])
+    // Multi-word terms must survive encoding intact.
+    assert.match(capturedUrl, /keyterm=blood\+pressure|keyterm=blood%20pressure/)
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("no keyterm param is sent when the vocabulary is empty", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  let capturedUrl = ""
+  globalThis.fetch = (async (url) => {
+    capturedUrl = String(url)
+    return new Response(
+      JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: "ok" }] }] } }),
+      { status: 200 },
+    )
+  }) as typeof fetch
+
+  try {
+    await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav", { keyterms: [] })
+    assert.equal(new URL(capturedUrl).searchParams.has("keyterm"), false)
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})

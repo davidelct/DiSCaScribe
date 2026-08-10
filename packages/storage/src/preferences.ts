@@ -10,6 +10,14 @@ export interface UserPreferences {
   preferredInputDeviceId?: string
   /** Capture mode applied to new encounters (study arm selector). */
   encounterMode?: EncounterMode
+  /**
+   * Keyterm vocabulary override. Absent means "use the committed default list"
+   * — the shared baseline every consultation gets — so the two are
+   * distinguishable from an explicit empty list, which means "send none".
+   * Kept global rather than per-consultation for the same reason encounterMode
+   * is: the vocabulary must not vary between recordings being compared.
+   */
+  keytermsOverride?: string[]
 }
 
 const PREFERENCES_KEY = "openscribe_preferences"

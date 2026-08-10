@@ -1,6 +1,11 @@
 import type { NextRequest } from "next/server"
 import { createPipelineError, toPipelineError } from "@pipeline-errors"
-import { parseWavHeader, resolveTranscriptionProvider, transcribeWithResolvedProviderDetailed } from "@transcription"
+import {
+  parseKeyterms,
+  parseWavHeader,
+  resolveTranscriptionProvider,
+  transcribeWithResolvedProviderDetailed,
+} from "@transcription"
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveTranscriptionArtifacts, getArchivalConfig } from "@/lib/archival"
@@ -85,6 +90,11 @@ export async function POST(req: NextRequest) {
     // artifacts under the same per-consult container as the later note upload.
     const encounterId = typeof formData.get("encounter_id") === "string" ? String(formData.get("encounter_id")) : ""
     const createdAt = typeof formData.get("created_at") === "string" ? String(formData.get("created_at")) : ""
+    // Keyterm vocabulary, newline-separated. Client-side setting, so it travels
+    // with the request rather than being read from server config.
+    const keyterms = parseKeyterms(
+      typeof formData.get("keyterms") === "string" ? String(formData.get("keyterms")) : "",
+    )
 
     if (typeof sessionId !== "string" || !(file instanceof Blob)) {
       return jsonError(400, "validation_error", "Missing session_id or file", false)
@@ -114,7 +124,7 @@ export async function POST(req: NextRequest) {
         Buffer.from(arrayBuffer),
         `${sessionId}-final.wav`,
         resolvedProvider,
-        { diarize: true, apiKey: keys.apiKey },
+        { diarize: true, apiKey: keys.apiKey, keyterms },
       )
       const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
@@ -168,6 +178,7 @@ export async function POST(req: NextRequest) {
           transcription_provider: resolvedProvider.provider,
           transcription_model: resolvedProvider.model,
           transcription_latency_ms: latencyMs,
+          keyterm_count: keyterms.length,
         },
       })
 
