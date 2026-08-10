@@ -31,6 +31,7 @@ import { Label } from "@ui/lib/ui/label"
 import { ErrorBoundary, MicTest, useEncounters, useHttpsWarning } from "@ui"
 import { setConsultationIntent, type ConsultationIntent } from "@/lib/consultation-intent"
 import { cn } from "@ui/lib/utils"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/lib/ui/tooltip"
 import {
   deleteEncounterAudio,
   formatNhsNumber,
@@ -40,7 +41,7 @@ import {
   patientAge,
   patientFullName,
 } from "@storage"
-import type { Encounter, Patient } from "@storage/types"
+import type { CodedEntry, Encounter, Patient, PatientObservation } from "@storage/types"
 import { TopBar } from "../../top-bar"
 
 /** Chart-facing lifecycle label for one consultation. */
@@ -60,6 +61,53 @@ function consultationStatus(e: Encounter): { label: string; className: string } 
   return { label: "In progress", className: "border-border bg-muted text-muted-foreground" }
 }
 
+/**
+ * A coded record entry. The chart reads as the record's own words; the code is
+ * a quiet affordance behind them, the way a GP system shows the binding without
+ * putting concept ids in the clinician's way.
+ */
+function CodedText({
+  entry,
+  components,
+}: {
+  entry: CodedEntry
+  /** Coded parts behind a single displayed value, e.g. the two halves of a BP. */
+  components?: PatientObservation["components"]
+}) {
+  if (!entry.code) return <>{entry.text}</>
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className="cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-4"
+        >
+          {entry.text}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <span className="block font-medium text-foreground">{entry.code.display}</span>
+        <span className="mt-0.5 block font-mono text-[0.7rem] text-muted-foreground">
+          SNOMED CT {entry.code.code}
+        </span>
+        {components?.length ? (
+          <span className="mt-2 block border-t border-border pt-1.5">
+            {components.map((component) => (
+              <span key={component.code.code} className="block text-[0.7rem] text-muted-foreground">
+                {component.code.display.replace(/\s*\(observable entity\)$/, "")}{" "}
+                <span className="font-mono">
+                  {component.value}
+                  {component.unit ? ` ${component.unit}` : ""} · {component.code.code}
+                </span>
+              </span>
+            ))}
+          </span>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function SummaryBlock({
   title,
   icon,
@@ -69,7 +117,7 @@ function SummaryBlock({
 }: {
   title: string
   icon: React.ReactNode
-  items: string[]
+  items: CodedEntry[]
   empty: string
   /** Stagger against the other chart cards, so the record assembles in order. */
   delayMs?: number
@@ -88,8 +136,8 @@ function SummaryBlock({
       ) : (
         <ul className="space-y-1.5">
           {items.map((item) => (
-            <li key={item} className="text-sm leading-relaxed text-foreground">
-              {item}
+            <li key={item.text} className="text-sm leading-relaxed text-foreground">
+              <CodedText entry={item} />
             </li>
           ))}
         </ul>
@@ -466,7 +514,9 @@ function PatientChartContent({ patientId }: { patientId: string }) {
                           <td className="py-2.5 pr-4 whitespace-nowrap text-muted-foreground">
                             {format(new Date(`${obs.date}T00:00:00`), "d MMM yyyy")}
                           </td>
-                          <td className="py-2.5 pr-4 text-foreground">{obs.name}</td>
+                          <td className="py-2.5 pr-4 text-foreground">
+                            <CodedText entry={{ text: obs.name, code: obs.code }} components={obs.components} />
+                          </td>
                           <td className="py-2.5 pr-4 whitespace-nowrap font-mono text-xs text-foreground">
                             {obs.value}
                             {obs.unit ? ` ${obs.unit}` : ""}
@@ -489,7 +539,9 @@ function PatientChartContent({ patientId }: { patientId: string }) {
 export function PatientChart({ patientId }: { patientId: string }) {
   return (
     <ErrorBoundary>
-      <PatientChartContent patientId={patientId} />
+      <TooltipProvider delayDuration={150} skipDelayDuration={400}>
+        <PatientChartContent patientId={patientId} />
+      </TooltipProvider>
     </ErrorBoundary>
   )
 }

@@ -1,6 +1,8 @@
 import type { TranscriptWordSpan } from "../../pipeline/shared/src/transcript"
+import type { CodedEntry, CodedConcept } from "./terminology"
 
 export type { TranscriptWordSpan }
+export type { CodedEntry, CodedConcept }
 
 /**
  * How a consultation is captured:
@@ -30,10 +32,14 @@ export interface Patient {
   sex: "male" | "female"
   address?: string
   phone?: string
-  /** Active diagnoses / past medical history, one entry per problem. */
-  past_history: string[]
-  medications: string[]
-  allergies: string[]
+  /**
+   * Active diagnoses / past medical history, one entry per problem. Each entry
+   * carries the record's own wording plus an optional code; uncoded entries are
+   * normal and render as plain text.
+   */
+  past_history: CodedEntry[]
+  medications: CodedEntry[]
+  allergies: CodedEntry[]
   social_history?: string
   /** Free-text registration summary shown at the top of the chart. */
   summary: string
@@ -54,6 +60,14 @@ export interface PatientObservation {
   value: string
   unit?: string
   notes?: string
+  /** What was measured, e.g. SNOMED CT "Body weight (observable entity)". */
+  code?: CodedConcept
+  /**
+   * Coded parts behind a single displayed value. Blood pressure reads as one
+   * row ("140/78") but is two observations underneath, which is how GP systems
+   * record it — coding it properly must not change what the clinician sees.
+   */
+  components?: Array<{ code: CodedConcept; value: string; unit?: string }>
 }
 
 export type EncounterStatus =

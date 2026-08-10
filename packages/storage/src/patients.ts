@@ -13,6 +13,7 @@
  */
 
 import type { Patient, PatientObservation } from "./types"
+import { SNOMED_CT_SYSTEM, coded } from "./terminology"
 
 // Patient ids are opaque and stable, like a real EPR's internal record ids.
 // Never derive them from patient identity: they appear in URLs, encounter
@@ -30,7 +31,7 @@ export const PATIENTS: Patient[] = [
     phone: "07123 100068",
     past_history: [],
     medications: [],
-    allergies: ["None known"],
+    allergies: [coded("None known", "716186003", "No known allergy (situation)")],
     social_history:
       "Retired postman. Lives with his wife Beryl. Smokes ~20 cigarettes/day, down from 60/day (>50-year history). One can of lager most evenings; does not go to the pub. Used to play golf regularly.",
     summary:
@@ -45,9 +46,14 @@ export const PATIENTS: Patient[] = [
     sex: "male",
     address: "27 Foundry Road, Cardiff",
     phone: "07123 100060",
-    past_history: ["Early knee osteoarthritis"],
-    medications: ["Paracetamol as required", "Topical ibuprofen as required"],
-    allergies: ["None known"],
+    past_history: [coded("Early knee osteoarthritis", "239873007", "Osteoarthritis of knee (disorder)")],
+    medications: [
+      // Coded at medicinal-product level: the record gives no dose or form, and
+      // a code must never be more specific than the text the clinician reads.
+      coded("Paracetamol as required", "777067000", "Product containing only paracetamol (medicinal product)"),
+      coded("Topical ibuprofen as required", "776287003", "Product containing only ibuprofen (medicinal product)"),
+    ],
+    allergies: [coded("None known", "716186003", "No known allergy (situation)")],
     social_history:
       "Self-employed removals man (owns his own lorry). Married with two children. Drinks a couple of beers or some whisky most evenings. Non-smoker. Reports current financial and work-related stress.",
     summary:
@@ -64,7 +70,7 @@ export const PATIENTS: Patient[] = [
     phone: "07123 100059",
     past_history: [],
     medications: [],
-    allergies: ["None known"],
+    allergies: [coded("None known", "716186003", "No known allergy (situation)")],
     social_history:
       "Runs her own office-furniture company. Lives with her husband (married ~40 years). Around 10 units of alcohol per week. Post-menopausal (periods stopped age 48). Up to date with cervical screening.",
     summary:
@@ -80,6 +86,11 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Blood pressure",
     value: "140/78",
     unit: "mmHg",
+    code: { system: SNOMED_CT_SYSTEM, code: "75367002", display: "Blood pressure (observable entity)" },
+    components: [
+      { code: { system: SNOMED_CT_SYSTEM, code: "271649006", display: "Systolic blood pressure (observable entity)" }, value: "140", unit: "mmHg" },
+      { code: { system: SNOMED_CT_SYSTEM, code: "271650006", display: "Diastolic blood pressure (observable entity)" }, value: "78", unit: "mmHg" },
+    ],
     notes: "On record (2022)",
   },
   {
@@ -89,9 +100,18 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Weight",
     value: "93",
     unit: "kg",
+    code: { system: SNOMED_CT_SYSTEM, code: "27113001", display: "Body weight (observable entity)" },
     notes: "BMI 31.1 (2022)",
   },
-  { id: "obs-derek-height", patient_id: "p-2c9d41ae", date: "2022-06-15", name: "Height", value: "1.73", unit: "m" },
+  {
+    id: "obs-derek-height",
+    patient_id: "p-2c9d41ae",
+    date: "2022-06-15",
+    name: "Height",
+    value: "1.73",
+    unit: "m",
+    code: { system: SNOMED_CT_SYSTEM, code: "1153637007", display: "Body height (observable entity)" },
+  },
   {
     id: "obs-andrew-bp-2025",
     patient_id: "p-b83f60d2",
@@ -99,6 +119,11 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Blood pressure",
     value: "140/95",
     unit: "mmHg",
+    code: { system: SNOMED_CT_SYSTEM, code: "75367002", display: "Blood pressure (observable entity)" },
+    components: [
+      { code: { system: SNOMED_CT_SYSTEM, code: "271649006", display: "Systolic blood pressure (observable entity)" }, value: "140", unit: "mmHg" },
+      { code: { system: SNOMED_CT_SYSTEM, code: "271650006", display: "Diastolic blood pressure (observable entity)" }, value: "95", unit: "mmHg" },
+    ],
     notes: "On record (last year)",
   },
   {
@@ -108,6 +133,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Weight",
     value: "88",
     unit: "kg",
+    code: { system: SNOMED_CT_SYSTEM, code: "27113001", display: "Body weight (observable entity)" },
     notes: "BMI 30.4",
   },
   {
@@ -117,6 +143,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Height",
     value: "1.70",
     unit: "m",
+    code: { system: SNOMED_CT_SYSTEM, code: "1153637007", display: "Body height (observable entity)" },
   },
   {
     id: "obs-kelly-weight",
@@ -125,6 +152,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Weight",
     value: "66",
     unit: "kg",
+    code: { system: SNOMED_CT_SYSTEM, code: "27113001", display: "Body weight (observable entity)" },
     notes: "BMI 25.1 (registration)",
   },
   {
@@ -134,6 +162,7 @@ export const PATIENT_OBSERVATIONS: PatientObservation[] = [
     name: "Height",
     value: "1.62",
     unit: "m",
+    code: { system: SNOMED_CT_SYSTEM, code: "1153637007", display: "Body height (observable entity)" },
     notes: "Registration",
   },
 ]
