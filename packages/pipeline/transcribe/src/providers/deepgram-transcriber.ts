@@ -1,4 +1,5 @@
 import { PipelineStageError, toPipelineStageError } from "../../../shared/src/error"
+import type { TranscriptWordSpan } from "../../../shared/src/transcript"
 
 /**
  * Deepgram Transcriber
@@ -32,14 +33,29 @@ export interface DeepgramTranscriberOptions {
   waitFn?: (ms: number) => Promise<void>
 }
 
+interface DeepgramWord {
+  word?: string
+  /** The word as it appears in the transcript once smart_format/punctuate ran. */
+  punctuated_word?: string
+  confidence?: number
+}
+
 interface DeepgramUtterance {
   speaker?: number
   transcript?: string
+  confidence?: number
+  words?: DeepgramWord[]
+}
+
+interface DeepgramAlternative {
+  transcript?: string
+  confidence?: number
+  words?: DeepgramWord[]
 }
 
 interface DeepgramResponse {
   results?: {
-    channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>
+    channels?: Array<{ alternatives?: DeepgramAlternative[] }>
     utterances?: DeepgramUtterance[]
   }
 }
@@ -97,50 +113,123 @@ async function fetchWithTimeout(
 }
 
 /**
+ * Find `token` at or after `from`, preferring a match that starts on a word
+ * boundary so a short token ("in") can't land inside a longer word ("inside").
+ * Falls back to a plain match when no boundary match exists.
+ */
+function findToken(text: string, token: string, from: number): number {
+  let index = text.indexOf(token, from)
+  while (index !== -1) {
+    const preceding = index > 0 ? text[index - 1] : " "
+    if (!/[A-Za-z0-9]/.test(preceding)) return index
+    index = text.indexOf(token, index + 1)
+  }
+  return text.indexOf(token, from)
+}
+
+/**
+ * Locate each word within the text Deepgram rendered for it, returning spans
+ * offset by `baseOffset` (the text's position in the full transcript).
+ *
+ * Deepgram lists words in order, so a monotonic cursor keeps repeated words
+ * distinct. smart_format can rewrite a word between the `words` array and the
+ * transcript ("eight" → "8"); those are skipped rather than mis-marked, which
+ * costs a mark but never attaches a confidence to the wrong text.
+ */
+function locateWords(text: string, words: DeepgramWord[], baseOffset: number): TranscriptWordSpan[] {
+  const spans: TranscriptWordSpan[] = []
+  let cursor = 0
+
+  for (const word of words) {
+    if (typeof word.confidence !== "number") continue
+    const token = (word.punctuated_word || word.word || "").trim()
+    if (!token) continue
+
+    const index = findToken(text, token, cursor)
+    if (index === -1) continue
+
+    spans.push({
+      start: baseOffset + index,
+      end: baseOffset + index + token.length,
+      confidence: word.confidence,
+    })
+    cursor = index + token.length
+  }
+
+  return spans
+}
+
+/** A rendered transcript plus word confidence spans indexed into it. */
+interface TranscriptWithSpans {
+  text: string
+  spans: TranscriptWordSpan[]
+}
+
+/**
  * Build a transcript with `Speaker N:` labels from Deepgram utterances, merging
  * consecutive utterances spoken by the same speaker into a single line.
+ *
+ * Confidence spans are collected while the string is assembled — the merge
+ * means utterances and rendered lines aren't 1:1, so offsets can't be
+ * reconstructed by re-parsing the result afterwards.
  */
-function formatDiarizedTranscript(utterances: DeepgramUtterance[]): string {
-  const lines: string[] = []
+function formatDiarizedTranscript(utterances: DeepgramUtterance[]): TranscriptWithSpans {
+  const spans: TranscriptWordSpan[] = []
+  let text = ""
   let currentSpeaker: number | null = null
-  let currentParts: string[] = []
+  let run: DeepgramUtterance[] = []
 
   const flush = () => {
-    if (currentParts.length > 0) {
-      lines.push(`Speaker ${currentSpeaker ?? 0}: ${currentParts.join(" ")}`)
-    }
+    if (run.length === 0) return
+    if (text) text += "\n"
+    text += `Speaker ${currentSpeaker ?? 0}: `
+
+    run.forEach((utterance, index) => {
+      if (index > 0) text += " "
+      const utteranceText = utterance.transcript?.trim() ?? ""
+      const baseOffset = text.length
+      text += utteranceText
+      if (utterance.words?.length) {
+        spans.push(...locateWords(utteranceText, utterance.words, baseOffset))
+      }
+    })
+
+    run = []
   }
 
   for (const utterance of utterances) {
-    const text = utterance.transcript?.trim()
-    if (!text) continue
+    if (!utterance.transcript?.trim()) continue
     const speaker = typeof utterance.speaker === "number" ? utterance.speaker : 0
     if (speaker !== currentSpeaker) {
       flush()
       currentSpeaker = speaker
-      currentParts = [text]
-    } else {
-      currentParts.push(text)
     }
+    run.push(utterance)
   }
   flush()
 
-  return lines.join("\n")
+  return { text, spans }
 }
 
-function extractTranscript(result: DeepgramResponse, diarize: boolean): string {
+function extractTranscript(result: DeepgramResponse, diarize: boolean): TranscriptWithSpans {
   const utterances = result.results?.utterances
   if (diarize && utterances && utterances.length > 0) {
     const diarized = formatDiarizedTranscript(utterances)
-    if (diarized) return diarized
+    if (diarized.text) return diarized
   }
-  return result.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? ""
+
+  const alternative = result.results?.channels?.[0]?.alternatives?.[0]
+  const text = alternative?.transcript?.trim() ?? ""
+  const spans = text && alternative?.words?.length ? locateWords(text, alternative.words, 0) : []
+  return { text, spans }
 }
 
 /** The raw, parsed Deepgram response plus whether diarization was requested. */
 export interface DeepgramDetailedResult {
   /** Transcript text (diarized with `Speaker N:` labels when diarize is on). */
   text: string
+  /** Word confidence spans, as character offsets into `text`. */
+  words: TranscriptWordSpan[]
   /** The full parsed Deepgram JSON response (utterances, words, confidence, …). */
   raw: DeepgramResponse
 }
@@ -272,13 +361,14 @@ export async function transcribeWavBuffer(
   options?: DeepgramTranscriberOptions,
 ): Promise<string> {
   const { result, diarize } = await requestDeepgram(buffer, filename, options)
-  return extractTranscript(result, diarize)
+  return extractTranscript(result, diarize).text
 }
 
 /**
- * Transcribe a WAV buffer with Deepgram, returning both the transcript text and
- * the full raw JSON response. Used when the raw output (word-level timings,
- * confidence, speaker turns) needs to be preserved alongside the rendered text.
+ * Transcribe a WAV buffer with Deepgram, returning the transcript text, word
+ * confidence spans indexed into it, and the full raw JSON response. Used when
+ * the raw output (word-level timings, confidence, speaker turns) needs to be
+ * preserved alongside the rendered text.
  */
 export async function transcribeWavBufferDetailed(
   buffer: Buffer,
@@ -286,5 +376,6 @@ export async function transcribeWavBufferDetailed(
   options?: DeepgramTranscriberOptions,
 ): Promise<DeepgramDetailedResult> {
   const { result, diarize } = await requestDeepgram(buffer, filename, options)
-  return { text: extractTranscript(result, diarize), raw: result }
+  const { text, spans } = extractTranscript(result, diarize)
+  return { text, words: spans, raw: result }
 }

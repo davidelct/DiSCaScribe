@@ -1,4 +1,5 @@
 import { toPipelineError, type PipelineError } from "../../shared/src/error"
+import type { TranscriptWordSpan } from "../../shared/src/transcript"
 
 type TranscriptionStatus = "recording" | "finalizing" | "completed" | "error"
 
@@ -22,6 +23,8 @@ interface SessionRecord {
   stitchedText: string
   status: TranscriptionStatus
   finalTranscript?: string
+  /** Word confidence spans, as character offsets into finalTranscript. */
+  finalTranscriptWords?: TranscriptWordSpan[]
   listeners: Set<(event: TranscriptionEvent) => void>
 }
 
@@ -129,6 +132,7 @@ class TranscriptionSessionStore {
         status: session.status,
         stitched_text: session.stitchedText,
         final_transcript: session.finalTranscript ?? null,
+        final_transcript_words: session.finalTranscriptWords ?? null,
       },
     })
 
@@ -185,13 +189,15 @@ class TranscriptionSessionStore {
         status,
         stitched_text: session.stitchedText,
         final_transcript: session.finalTranscript ?? null,
+        final_transcript_words: session.finalTranscriptWords ?? null,
       },
     })
   }
 
-  setFinalTranscript(sessionId: string, transcript: string) {
+  setFinalTranscript(sessionId: string, transcript: string, words: TranscriptWordSpan[] = []) {
     const session = this.getSession(sessionId)
     session.finalTranscript = transcript
+    session.finalTranscriptWords = words
     session.status = "completed"
     this.sessionTimestamps.set(sessionId, Date.now()) // Update timestamp on completion
     console.log(`[SessionStore] Session ${sessionId} marked complete`)
@@ -200,6 +206,7 @@ class TranscriptionSessionStore {
       data: {
         session_id: sessionId,
         final_transcript: transcript,
+        final_transcript_words: words,
       },
     })
   }

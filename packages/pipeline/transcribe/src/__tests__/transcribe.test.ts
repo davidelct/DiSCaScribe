@@ -267,3 +267,218 @@ test("transcribeWavBuffer enforces HTTPS for HIPAA compliance", async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test("transcribeWavBufferDetailed returns word spans that index into the transcript", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  const deepgramResponse = {
+    results: {
+      channels: [{ alternatives: [{ transcript: "Take ramipril daily. Understood." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "Take ramipril daily.",
+          words: [
+            { word: "take", punctuated_word: "Take", confidence: 0.99 },
+            { word: "ramipril", punctuated_word: "ramipril", confidence: 0.42 },
+            { word: "daily", punctuated_word: "daily.", confidence: 0.97 },
+          ],
+        },
+        {
+          speaker: 1,
+          transcript: "Understood.",
+          words: [{ word: "understood", punctuated_word: "Understood.", confidence: 0.88 }],
+        },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+
+    assert.equal(result.text, "Speaker 0: Take ramipril daily.\nSpeaker 1: Understood.")
+    assert.equal(result.words.length, 4)
+
+    // Every span must slice its own word back out of the rendered transcript —
+    // including across the speaker-label prefix and the newline between turns.
+    const sliced = result.words.map((span) => result.text.slice(span.start, span.end))
+    assert.deepEqual(sliced, ["Take", "ramipril", "daily.", "Understood."])
+
+    const uncertain = result.words.find((span) => span.confidence < 0.6)
+    assert.equal(result.text.slice(uncertain!.start, uncertain!.end), "ramipril")
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("word spans stay aligned when consecutive utterances are merged into one line", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  // Same speaker twice: the transcriber joins these into a single line, so the
+  // second utterance's offsets depend on the first — the case that breaks if
+  // offsets are reconstructed after the fact rather than during assembly.
+  const deepgramResponse = {
+    results: {
+      channels: [{ alternatives: [{ transcript: "Chest pain. Since Tuesday." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "Chest pain.",
+          words: [
+            { punctuated_word: "Chest", confidence: 0.95 },
+            { punctuated_word: "pain.", confidence: 0.91 },
+          ],
+        },
+        {
+          speaker: 0,
+          transcript: "Since Tuesday.",
+          words: [
+            { punctuated_word: "Since", confidence: 0.93 },
+            { punctuated_word: "Tuesday.", confidence: 0.35 },
+          ],
+        },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+
+    assert.equal(result.text, "Speaker 0: Chest pain. Since Tuesday.")
+    const sliced = result.words.map((span) => result.text.slice(span.start, span.end))
+    assert.deepEqual(sliced, ["Chest", "pain.", "Since", "Tuesday."])
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("repeated words get distinct spans rather than all matching the first", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  const deepgramResponse = {
+    results: {
+      channels: [{ alternatives: [{ transcript: "No no not really." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "No no not really.",
+          words: [
+            { punctuated_word: "No", confidence: 0.9 },
+            { punctuated_word: "no", confidence: 0.5 },
+            { punctuated_word: "not", confidence: 0.8 },
+            { punctuated_word: "really.", confidence: 0.7 },
+          ],
+        },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+
+    const starts = result.words.map((span) => span.start)
+    assert.equal(new Set(starts).size, 4, "each word should occupy its own offset")
+    // "not" must not be matched inside the preceding "no" — the boundary check.
+    assert.deepEqual(
+      result.words.map((span) => result.text.slice(span.start, span.end)),
+      ["No", "no", "not", "really."],
+    )
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("words rewritten by smart_format are skipped rather than mis-marked", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  // smart_format renders "eight" as "8" in the transcript; the raw word never
+  // appears, so it must be dropped instead of attaching to unrelated text.
+  const deepgramResponse = {
+    results: {
+      channels: [{ alternatives: [{ transcript: "Take 8 tablets." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "Take 8 tablets.",
+          words: [
+            { punctuated_word: "Take", confidence: 0.99 },
+            { punctuated_word: "eight", confidence: 0.4 },
+            { punctuated_word: "tablets.", confidence: 0.95 },
+          ],
+        },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+
+    assert.deepEqual(
+      result.words.map((span) => result.text.slice(span.start, span.end)),
+      ["Take", "tablets."],
+    )
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("a non-diarized response still yields word spans", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+
+  const deepgramResponse = {
+    results: {
+      channels: [
+        {
+          alternatives: [
+            {
+              transcript: "Blood pressure is fine.",
+              words: [
+                { punctuated_word: "Blood", confidence: 0.99 },
+                { punctuated_word: "pressure", confidence: 0.45 },
+                { punctuated_word: "is", confidence: 0.98 },
+                { punctuated_word: "fine.", confidence: 0.97 },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  }
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(deepgramResponse), { status: 200 })) as typeof fetch
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: false })
+
+    assert.equal(result.text, "Blood pressure is fine.")
+    assert.deepEqual(
+      result.words.map((span) => result.text.slice(span.start, span.end)),
+      ["Blood", "pressure", "is", "fine."],
+    )
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+})

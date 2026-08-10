@@ -1,3 +1,7 @@
+import type { TranscriptWordSpan } from "../../pipeline/shared/src/transcript"
+
+export type { TranscriptWordSpan }
+
 /**
  * How a consultation is captured:
  * - "scribed": full pipeline — transcription plus clinical note generation
@@ -101,6 +105,13 @@ export interface Encounter {
   updated_at: string
   audio_blob?: Blob
   transcript_text: string
+  /**
+   * Per-word transcription confidence, as character offsets into
+   * transcript_text. Absent on encounters recorded before this existed, and on
+   * any where the provider returned no word data — the transcript still renders,
+   * just without confidence marks.
+   */
+  transcript_confidence?: TranscriptWordSpan[]
   /**
    * Clinical note in markdown format
    * This is the primary storage format for notes

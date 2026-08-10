@@ -22,7 +22,7 @@ import {
   toPipelineError,
   type PipelineError,
 } from "@pipeline-errors"
-import type { Encounter } from "@storage/types"
+import type { Encounter, TranscriptWordSpan } from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
@@ -541,8 +541,12 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   const handleFinalEvent = useCallback(
     (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data) as { final_transcript?: string }
+        const data = JSON.parse(event.data) as {
+          final_transcript?: string
+          final_transcript_words?: TranscriptWordSpan[] | null
+        }
         const transcript = data.final_transcript || ""
+        const transcriptWords = data.final_transcript_words ?? []
         if (!transcript) return
         if (isBlankTranscriptText(transcript)) {
           setTranscriptionErrorMessage("No speech signal detected. Check microphone input/device and retry.")
@@ -554,7 +558,10 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         setTranscriptionErrorMessage("")
         setTranscriptionStatus("done")
         void (async () => {
-          await updateEncounterRef.current(encounterId, { transcript_text: transcript })
+          await updateEncounterRef.current(encounterId, {
+            transcript_text: transcript,
+            transcript_confidence: transcriptWords,
+          })
           await refreshRef.current()
           const mode = encountersRef.current.find((e: Encounter) => e.id === encounterId)?.mode
           if (mode === "recording_only") {
@@ -682,6 +689,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         status: "recording",
         session_id: session,
         transcript_text: "",
+        // Drop any prior spans with the transcript they indexed into.
+        transcript_confidence: [],
       })
 
       // Optimistically flip to recording immediately for responsive UI.
@@ -906,6 +915,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         status: "processing",
         session_id: session,
         transcript_text: "",
+        // Drop any prior spans with the transcript they indexed into.
+        transcript_confidence: [],
       })
       setLive("processing")
 

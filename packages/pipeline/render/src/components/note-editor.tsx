@@ -490,7 +490,10 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                 />
               )}
               {hasTranscript ? (
-                <TranscriptView text={encounter.transcript_text} />
+                <TranscriptView
+                  text={encounter.transcript_text}
+                  confidence={encounter.transcript_confidence}
+                />
               ) : (
                 <div className="flex h-full min-h-[380px] items-center justify-center text-center">
                   <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-balance">

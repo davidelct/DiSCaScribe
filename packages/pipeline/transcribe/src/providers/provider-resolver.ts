@@ -2,6 +2,7 @@ import {
   transcribeWavBuffer as transcribeWithDeepgram,
   transcribeWavBufferDetailed as transcribeWithDeepgramDetailed,
 } from "./deepgram-transcriber"
+import type { TranscriptWordSpan } from "../../../shared/src/transcript"
 
 export type TranscriptionProvider = "deepgram"
 
@@ -52,6 +53,8 @@ export async function transcribeWithResolvedProvider(
 /** Transcript text plus the provider's raw response. */
 export interface DetailedTranscription {
   text: string
+  /** Word confidence spans, as character offsets into `text`. */
+  words: TranscriptWordSpan[]
   /** Full Deepgram response (word timings, confidence, speaker turns). */
   raw: unknown
 }

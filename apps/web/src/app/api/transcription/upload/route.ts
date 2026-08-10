@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      transcriptionSessionStore.setFinalTranscript(sessionId, transcript)
+      transcriptionSessionStore.setFinalTranscript(sessionId, transcript, detail.words)
 
       await writeAuditEntry({
         event_type: "transcription.completed",
