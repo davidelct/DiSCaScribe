@@ -11,11 +11,10 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { format } from "date-fns"
 import { ArrowLeft, FileQuestion, Loader2 } from "lucide-react"
-import { Badge } from "@ui/lib/ui/badge"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
 import { cn } from "@ui/lib/utils"
 import { StimulatedRecallView } from "@note-rendering"
-import { formatNhsNumber, getPatient, isLinkedToPatient } from "@storage"
+import { getPatient, isLinkedToPatient } from "@storage"
 import type { Encounter } from "@storage/types"
 import { TopBar } from "../../top-bar"
 
@@ -90,21 +89,15 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
             >
               {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
             </h2>
-            {patient && (
-              <Badge variant="secondary" className="rounded-md border-transparent bg-brand-soft font-mono text-xs text-primary">
-                NHS {formatNhsNumber(patient.nhs_number)}
-              </Badge>
-            )}
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-              <span>{format(new Date(encounter.created_at), "MMM d, yyyy 'at' h:mm a")}</span>
+            <span className="text-xs font-medium text-muted-foreground">Stimulated recall</span>
+            <div className="ml-auto flex min-w-0 items-center gap-x-2 text-xs text-muted-foreground">
+              <span className="whitespace-nowrap">{format(new Date(encounter.created_at), "d MMM yyyy, HH:mm")}</span>
               {encounter.visit_reason && (
                 <>
                   <span className="text-border">·</span>
                   <span className="truncate">{encounter.visit_reason}</span>
                 </>
               )}
-              <span className="text-border">·</span>
-              <span>Stimulated recall</span>
             </div>
           </div>
         </div>

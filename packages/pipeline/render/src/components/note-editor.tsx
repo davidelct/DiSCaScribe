@@ -2,16 +2,20 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import type { Encounter, NoteVersion } from "@storage/types"
-import { getPatient, formatNhsNumber, isLinkedToPatient, noteVersionsOf } from "@storage"
+import { isLinkedToPatient, noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
 import { Badge } from "@ui/lib/ui/badge"
+import { Skeleton } from "@ui/lib/ui/skeleton"
 import {
   Save,
   Check,
+  ChevronRight,
   Loader2,
   Pencil,
   RotateCcw,
+  Square,
+  SquareCheck,
   X,
   FileCheck,
   History,
@@ -26,13 +30,22 @@ import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
 import { parseNoteSections, type NoteSection } from "../note-sections"
 
+/**
+ * The consultation as one page that reads in the order things happen: the
+ * audio, then the transcript, then the clinical note, stacked. A stage strip
+ * under the identity row says which of the three is done, live or drafting.
+ * Nothing sits behind a tab: while the note drafts the transcript is there to
+ * read above it, and once the note lands the transcript folds away so the
+ * page settles on the note.
+ */
+
 export type CaptureStepStatus = "pending" | "in-progress" | "done" | "failed"
 
 /**
  * Live pipeline state for the encounter currently being captured. Present only
- * while this encounter is recording or processing; the Capture tab renders the
- * recording bar / generation progress from it, so the clinician stays in one
- * view from first word to finished note.
+ * while this encounter is recording or processing; the audio card renders the
+ * recording bar from it and the stage strip and cards show the progress, so
+ * the clinician stays in one view from first word to finished note.
  */
 export interface LiveCaptureState {
   phase: "recording" | "processing"
@@ -61,8 +74,6 @@ interface NoteEditorProps {
   /** Navigation element rendered before the patient name (back to chart). */
   backLink?: ReactNode
 }
-
-type TabType = "capture" | "note"
 
 const SOAP_TITLES = ["Subjective", "Objective", "Assessment", "Plan"]
 
@@ -117,7 +128,38 @@ function SectionedNote({ source }: { source: string }) {
   )
 }
 
-/** A failed pipeline step, shown in the capture flow with its retry action. */
+/**
+ * The note's shape while it drafts: the four SOAP headings with placeholder
+ * lines beneath, so the structure lands before the words do.
+ */
+const NOTE_SKELETON: Array<{ title: string; lines: number[] }> = [
+  { title: "Subjective", lines: [96, 88, 42] },
+  { title: "Objective", lines: [58] },
+  { title: "Assessment", lines: [64] },
+  { title: "Plan", lines: [72, 66, 80] },
+]
+
+function NoteSkeleton() {
+  return (
+    <div className="[&>*+*]:mt-8" role="status" aria-label="Drafting the clinical note">
+      {NOTE_SKELETON.map((section) => (
+        <section key={section.title}>
+          <h2 className="mb-3 border-b border-border pb-2 font-display text-xl font-medium tracking-tight text-muted-foreground">
+            {section.title}
+          </h2>
+          <div className="space-y-2.5">
+            {section.lines.map((width, index) => (
+              <Skeleton key={index} className="h-3" style={{ width: `${width}%` }} />
+            ))}
+          </div>
+        </section>
+      ))}
+      <span className="sr-only">Drafting the clinical note…</span>
+    </div>
+  )
+}
+
+/** A failed pipeline step, shown above the stages with its retry action. */
 function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-5 py-3">
@@ -128,7 +170,7 @@ function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () =
           variant="outline"
           size="sm"
           onClick={onRetry}
-          className="h-8 shrink-0 rounded-full border-destructive/40 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          className="h-8 shrink-0 rounded-md border-destructive/40 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
         >
           <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
           <span className="text-xs">Retry</span>
@@ -138,6 +180,50 @@ function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () =
   )
 }
 
+type StageState = "pending" | "live" | "active" | "done" | "failed"
+
+/**
+ * One stage of the pipeline: a label and nothing but a mark. Done, live and
+ * drafting all use the accent, drawn in outline so nothing on the strip is
+ * heavier than the content below it.
+ */
+function StageChip({ label, state }: { label: string; state: StageState }) {
+  const mark =
+    state === "done" ? (
+      <SquareCheck className="h-4 w-4 text-primary" />
+    ) : state === "active" ? (
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+    ) : state === "live" ? (
+      <span className="mx-[3px] h-2.5 w-2.5 animate-pulse rounded-[3px] bg-primary ring-4 ring-primary/20" />
+    ) : state === "failed" ? (
+      <X className="h-4 w-4 text-destructive" />
+    ) : (
+      <Square className="h-4 w-4 text-muted-foreground/50" />
+    )
+  // Plain text beside its mark: a label, not a control.
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-xs font-medium",
+        state === "active" || state === "live"
+          ? "text-primary"
+          : state === "failed"
+            ? "text-destructive"
+            : state === "pending"
+              ? "text-muted-foreground"
+              : "text-foreground",
+      )}
+    >
+      {mark}
+      {label}
+    </span>
+  )
+}
+
+const CARD = "rounded-2xl border border-border bg-card shadow-soft"
+const CARD_HEAD = "flex min-h-8 flex-wrap items-center gap-2 px-5 py-3"
+const CARD_BODY = "border-t border-border px-5 py-4"
+
 export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: NoteEditorProps) {
   const recordingOnly = encounter.mode === "recording_only"
   const approved = encounter.approval_status === "approved"
@@ -145,9 +231,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const versions = noteVersionsOf(encounter)
   const linked = isLinkedToPatient(encounter)
-  const patient = getPatient(encounter.patient_id)
 
-  const [activeTab, setActiveTab] = useState<TabType>(hasNote ? "note" : "capture")
   const [noteMode, setNoteMode] = useState<"preview" | "edit">("preview")
   const [noteMarkdown, setNoteMarkdown] = useState<string>(encounter.note_text || "")
   // Per-section edit buffers. Null while previewing, and also null in edit
@@ -159,6 +243,9 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   // Read-only view of an older version from the trail; null = current note.
   const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  // The transcript is open while it is the only thing to read, and folds away
+  // once a note exists so the page settles on the note.
+  const [transcriptOpen, setTranscriptOpen] = useState(!hasNote)
   const prevNoteRef = useRef<string>(encounter.note_text || "")
 
   // Reset the view when switching encounters.
@@ -168,28 +255,27 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
     setEditSections(null)
     setViewingVersion(null)
     setShowHistory(false)
-    setActiveTab(encounter.note_text?.trim() ? "note" : "capture")
+    setTranscriptOpen(!encounter.note_text?.trim())
     prevNoteRef.current = encounter.note_text || ""
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encounter.id])
 
-  // Keep the editable markdown in sync with the stored note, and auto-advance
-  // from Capture to the note the moment generation delivers it.
+  // Keep the editable markdown in sync with the stored note, and fold the
+  // transcript the moment generation delivers the note.
   useEffect(() => {
     setNoteMarkdown(encounter.note_text || "")
     const hadNote = Boolean(prevNoteRef.current?.trim())
     const hasNoteNow = Boolean(encounter.note_text?.trim())
     if (!hadNote && hasNoteNow) {
-      setActiveTab("note")
       setNoteMode("preview")
       setHasChanges(false)
+      setTranscriptOpen(false)
     }
     prevNoteRef.current = encounter.note_text || ""
   }, [encounter.note_text])
 
-  // Sequential enablement: the note tab opens once the note exists, or — for
-  // writing one manually (recording-only arm, or a failed generation) — once
-  // capture has finished and delivered a transcript.
+  // A note can be written by hand (recording-only arm, or a failed generation)
+  // once capture has finished and delivered a transcript.
   const noteEnabled = hasNote || (hasTranscript && !live)
 
   const noteVersionNumber = encounter.note_version ?? 0
@@ -262,51 +348,102 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
 
   const displayedNote = viewingVersion ? viewingVersion.note_text : noteMarkdown
 
-  // The tabs are the pipeline: each step's live status is shown on its tab.
-  const tabButton = (tab: TabType, label: string, enabled: boolean, status?: ReactNode) => (
-    <button
-      onClick={() => enabled && setActiveTab(tab)}
-      disabled={!enabled}
-      className={cn(
-        "flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors",
-        "border-b-2 -mb-px",
-        activeTab === tab
-          ? "border-primary text-foreground"
-          : enabled
-            ? "border-transparent text-muted-foreground hover:text-foreground"
-            : "cursor-not-allowed border-transparent text-muted-foreground/40",
-      )}
-    >
-      {label}
-      {status}
-    </button>
-  )
+  // ── Stage states ──────────────────────────────────────────────────────
+  const recordingStage: StageState =
+    live?.phase === "recording"
+      ? "live"
+      : hasTranscript || live?.phase === "processing" || Boolean(encounter.recording_duration)
+        ? "done"
+        : "pending"
+  const transcriptStage: StageState =
+    live?.transcriptionStatus === "failed"
+      ? "failed"
+      : live?.phase === "processing" && live.transcriptionStatus === "in-progress"
+        ? "active"
+        : hasTranscript
+          ? "done"
+          : "pending"
+  const noteStage: StageState =
+    live?.noteGenerationStatus === "failed"
+      ? "failed"
+      : live?.noteGenerationStatus === "in-progress"
+        ? "active"
+        : hasNote
+          ? "done"
+          : "pending"
 
-  const captureStatus =
-    live?.phase === "recording" ? (
-      <span className={cn("h-2 w-2 rounded-full", live.isPaused ? "bg-muted-foreground" : "animate-pulse bg-recording")} />
-    ) : live?.transcriptionStatus === "in-progress" ? (
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-    ) : live?.transcriptionStatus === "failed" ? (
-      <X className="h-3.5 w-3.5 text-destructive" />
-    ) : null
+  const transcriptCanOpen = hasTranscript || transcriptStage === "active"
+  const showTranscriptBody = transcriptCanOpen && transcriptOpen
 
-  const noteStatus =
-    live?.noteGenerationStatus === "in-progress" ? (
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-    ) : live?.noteGenerationStatus === "failed" ? (
-      <X className="h-3.5 w-3.5 text-destructive" />
-    ) : null
+  const showEditingActions = noteMode === "edit"
+  const showPreviewActions = hasNote && noteMode === "preview" && !approved && !viewingVersion
 
-
-  const showEditingActions = activeTab === "note" && noteMode === "edit"
-  const showPreviewActions = activeTab === "note" && hasNote && noteMode === "preview" && !approved && !viewingVersion
+  // What the note card holds beneath its header, if anything.
+  const noteBody: ReactNode = (() => {
+    if (noteMode === "edit") {
+      return editSections ? (
+        <div className="space-y-4">
+          {!hasNote && (
+            <p className="text-sm text-muted-foreground">
+              Write the clinical note for this consultation. Each section is filed as part of the SOAP note.
+            </p>
+          )}
+          {editSections.map((section, index) => (
+            <div key={section.title} className="rounded-xl border border-border bg-background p-4">
+              <label
+                htmlFor={`soap-${section.title}`}
+                className="mb-2 block font-display text-lg font-medium tracking-tight text-foreground"
+              >
+                {section.title}
+              </label>
+              <Textarea
+                id={`soap-${section.title}`}
+                value={section.body}
+                onChange={(e) => handleSectionChange(index, e.target.value)}
+                placeholder={`${section.title}…`}
+                className="min-h-[120px] resize-y rounded-lg border-border bg-card p-4 text-sm leading-relaxed text-foreground focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Textarea
+          value={noteMarkdown}
+          onChange={(e) => handleRawChange(e.target.value)}
+          placeholder="Clinical note markdown…"
+          className="min-h-[520px] resize-none rounded-lg border-border bg-background p-5 font-mono text-sm leading-relaxed text-foreground focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+        />
+      )
+    }
+    if (hasNote) return <SectionedNote source={displayedNote} />
+    if (noteStage === "active") return <NoteSkeleton />
+    if (noteEnabled) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
+          <Pencil className="h-8 w-8 text-muted-foreground/40" />
+          <p className="max-w-sm text-sm leading-relaxed text-muted-foreground text-balance">
+            {recordingOnly
+              ? "No note yet. Write the clinical note for this consultation yourself — the scribe stays out of it in this mode."
+              : "No note was generated. You can write the clinical note manually."}
+          </p>
+          <Button
+            onClick={enterEditMode}
+            className="rounded-md bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
+          >
+            <Pencil className="mr-2 h-4 w-4" />
+            Write clinical note
+          </Button>
+        </div>
+      )
+    }
+    return null
+  })()
 
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 bg-card/60 px-6 pt-2 backdrop-blur-sm">
-        {/* Single compact row: back navigation + identity on the left. */}
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      {/* One row: back, who, the pipeline's state, and when on the right. */}
+      <div className="shrink-0 border-b border-border bg-card/60 px-6 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
           {backLink}
           <h2
             className={cn(
@@ -316,23 +453,22 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
           >
             {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
           </h2>
-          {(patient || encounter.patient_id) && (
-            <Badge
-              variant="secondary"
-              className="rounded-full border-transparent bg-brand-soft font-mono text-xs text-primary"
-            >
-              {patient ? `NHS ${formatNhsNumber(patient.nhs_number)}` : encounter.patient_id}
-            </Badge>
-          )}
           {approved && (
-            <Badge className="rounded-full border-success/30 bg-success/10 text-xs font-semibold text-success">
+            <Badge className="rounded-md border-success/30 bg-success/10 text-xs font-semibold text-success">
               <FileCheck className="mr-1 h-3 w-3" />
               Filed
               {encounter.approved_at ? ` ${format(new Date(encounter.approved_at), "d MMM, HH:mm")}` : ""}
             </Badge>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-            <span>{format(new Date(encounter.created_at), "MMM d, yyyy 'at' h:mm a")}</span>
+          <div className="ml-2 flex items-center gap-2.5">
+            <StageChip label="Recording" state={recordingStage} />
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+            <StageChip label="Transcript" state={transcriptStage} />
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+            <StageChip label="Clinical note" state={noteStage} />
+          </div>
+          <div className="ml-auto flex min-w-0 items-center gap-x-2 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">{format(new Date(encounter.created_at), "d MMM yyyy, HH:mm")}</span>
             {encounter.visit_reason && (
               <>
                 <span className="text-border">·</span>
@@ -341,261 +477,210 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
             )}
           </div>
         </div>
-
-        <div className="mt-1 flex items-center justify-between gap-4 border-b border-border">
-          <div className="flex gap-1">
-            {tabButton("capture", "Capture", true, captureStatus)}
-            {tabButton("note", "Clinical Note", noteEnabled, noteStatus)}
-          </div>
-
-          <div className="flex items-center gap-1 pb-2">
-            {activeTab === "note" && hasNote && versions.length > 0 && (
-              <div className="relative mr-1">
-                <button
-                  type="button"
-                  onClick={() => setShowHistory((v) => !v)}
-                  title={
-                    noteArchive === "pending"
-                      ? "Saving this version to the archive…"
-                      : noteArchive === "archived"
-                        ? "This version is saved to the archive"
-                        : noteArchive === "failed"
-                          ? "Archiving this version failed"
-                          : noteArchive === "skipped"
-                            ? "Archiving not configured — stored locally only"
-                            : "Note version history"
-                  }
-                  className="flex h-8 items-center gap-1.5 rounded-full border border-border px-2.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <History className="h-3 w-3" />
-                  v{noteVersionNumber}
-                  {noteArchive === "pending" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
-                  {noteArchive === "archived" && <Check className="h-3 w-3 text-success" />}
-                  {noteArchive === "failed" && <X className="h-3 w-3 text-destructive" />}
-                  <ChevronDown className={cn("h-3 w-3 transition-transform", showHistory && "rotate-180")} />
-                </button>
-                {showHistory && (
-                  <div className="absolute right-0 top-9 z-20 w-72 rounded-2xl border border-border bg-popover p-1.5 shadow-lifted">
-                    {[...versions].reverse().map((version) => {
-                      const isCurrent = version.version === noteVersionNumber && !viewingVersion
-                      const isViewing = viewingVersion?.version === version.version
-                      return (
-                        <button
-                          key={version.version}
-                          type="button"
-                          onClick={() => {
-                            setViewingVersion(version.version === noteVersionNumber ? null : version)
-                            setShowHistory(false)
-                            setNoteMode("preview")
-                          }}
-                          className={cn(
-                            "flex w-full items-baseline gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-accent",
-                            (isCurrent || isViewing) && "bg-accent/60",
-                          )}
-                        >
-                          <span className="font-mono text-xs text-foreground">v{version.version}</span>
-                          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                            {VERSION_SOURCE_LABELS[version.source]}
-                          </span>
-                          <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
-                            {format(new Date(version.created_at), "HH:mm")}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-            {showPreviewActions && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={enterEditMode}
-                  title="Edit the note"
-                  className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                >
-                  <Pencil className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">Edit</span>
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => onApprove(noteMarkdown)}
-                  title="File this note to the patient record. The consultation locks after approval."
-                  className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
-                >
-                  <FileCheck className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">Approve & file</span>
-                </Button>
-              </>
-            )}
-            {showEditingActions && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDiscard}
-                  title="Discard your edits and keep the current version"
-                  className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">Discard</span>
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={!editHasContent()}
-                  title="Save as the next note version"
-                  className="mr-1 h-8 rounded-full bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
-                >
-                  <Save className="mr-1.5 h-4 w-4" />
-                  <span className="text-xs">Save</span>
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* One width for both tabs: the transcript and the note are working
-            surfaces, and switching between them must not reflow the page. */}
-        <div className="mx-auto w-full max-w-6xl px-6 py-4">
-          {/* Panels stay mounted and hide via CSS, so the audio player (and its
-              playback position) survives tab switches without remount flicker. */}
-          <div className={cn("flex flex-col gap-4", activeTab !== "capture" && "hidden")}>
-            {live?.transcriptionStatus === "failed" && (
-              <CaptureErrorRow
-                message={live.transcriptionErrorMessage || "Transcription failed."}
-                onRetry={live.onRetryTranscription}
-              />
-            )}
-            {live?.noteGenerationStatus === "failed" && (
-              <CaptureErrorRow message="Clinical note generation failed." onRetry={live.onRetryNoteGeneration} />
-            )}
-            <div className="min-h-[480px] rounded-2xl border border-border bg-card p-6 shadow-soft">
-              {/* The audio strip stays fixed at the top of the card: the live
-                  recording controls morph in place into the playback player. */}
-              {live?.phase === "recording" ? (
-                <RecordingBar
-                  duration={live.duration ?? 0}
-                  isPaused={Boolean(live.isPaused)}
-                  analyser={live.analyser ?? null}
-                  onStop={live.onStop ?? (() => undefined)}
-                  onPause={live.onPause ?? (() => undefined)}
-                  onResume={live.onResume ?? (() => undefined)}
-                  stopLabel={recordingOnly ? "Stop recording" : "Stop & generate"}
-                  className="mb-4 border-b border-border pb-4"
-                />
-              ) : (
-                <AudioPlayer
-                  audioKey={encounter.id}
-                  placeholder={Boolean(live)}
-                  className="mb-4 border-b border-border pb-4"
-                />
-              )}
-              {hasTranscript ? (
-                // No wrapper animation: the turns animate themselves, and
-                // fading the whole block at once flattens their stagger.
-                <TranscriptView
-                  text={encounter.transcript_text}
-                  confidence={encounter.transcript_confidence}
-                />
-              ) : live?.phase === "processing" ? (
-                // Hold the transcript's shape while it is on its way, so its
-                // arrival is a crossfade rather than a jump from centred text.
-                <TranscriptSkeleton />
-              ) : (
-                <div className="flex h-full min-h-[380px] items-center justify-center text-center">
-                  <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-balance">
-                    {live?.phase === "recording"
-                      ? "The transcript will appear here once you stop the recording."
-                      : "No transcript available."}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-          {noteEnabled && (
-            <div className={cn(activeTab !== "note" && "hidden")}>
-              {viewingVersion && (
-                <div className="mb-4 flex items-center gap-3 rounded-2xl border border-border bg-accent/40 px-5 py-3">
-                  <History className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                    Viewing v{viewingVersion.version} · {VERSION_SOURCE_LABELS[viewingVersion.source]} ·{" "}
-                    {format(new Date(viewingVersion.created_at), "d MMM, HH:mm")} — read-only
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setViewingVersion(null)}
-                    className="h-8 shrink-0 rounded-full px-3"
-                  >
-                    <span className="text-xs">Back to latest</span>
-                  </Button>
-                </div>
-              )}
-              {noteMode === "edit" ? (
-                editSections ? (
-                  <div className="space-y-4">
-                    {!hasNote && (
-                      <p className="text-sm text-muted-foreground">
-                        Write the clinical note for this consultation. Each section is filed as part of the SOAP note.
-                      </p>
-                    )}
-                    {editSections.map((section, index) => (
-                      <div
-                        key={section.title}
-                        className="rounded-2xl border border-border bg-card p-5 shadow-soft"
-                      >
-                        <label
-                          htmlFor={`soap-${section.title}`}
-                          className="mb-2 block font-display text-lg font-medium tracking-tight text-foreground"
-                        >
-                          {section.title}
-                        </label>
-                        <Textarea
-                          id={`soap-${section.title}`}
-                          value={section.body}
-                          onChange={(e) => handleSectionChange(index, e.target.value)}
-                          placeholder={`${section.title}…`}
-                          className="min-h-[120px] resize-y rounded-xl border-border bg-background p-4 text-sm leading-relaxed text-foreground focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <Textarea
-                    value={noteMarkdown}
-                    onChange={(e) => handleRawChange(e.target.value)}
-                    placeholder="Clinical note markdown…"
-                    className="min-h-[640px] resize-none rounded-2xl border-border bg-card p-6 font-mono text-sm leading-relaxed text-foreground shadow-soft focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/30"
-                  />
-                )
-              ) : hasNote ? (
-                <div className="min-h-[640px] rounded-2xl border border-border bg-card p-6 shadow-soft">
-                  <SectionedNote source={displayedNote} />
-                </div>
-              ) : (
-                <div className="flex min-h-[480px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
-                  <Pencil className="h-8 w-8 text-muted-foreground/40" />
-                  <p className="max-w-sm text-sm leading-relaxed text-muted-foreground text-balance">
-                    {recordingOnly
-                      ? "No note yet. Write the clinical note for this consultation yourself — the scribe stays out of it in this mode."
-                      : "No note was generated. You can write the clinical note manually."}
-                  </p>
-                  <Button
-                    onClick={enterEditMode}
-                    className="rounded-full bg-primary px-5 text-primary-foreground shadow-soft hover:bg-brand-strong"
-                  >
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Write clinical note
-                  </Button>
-                </div>
-              )}
-            </div>
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-6 py-4">
+          {live?.transcriptionStatus === "failed" && (
+            <CaptureErrorRow
+              message={live.transcriptionErrorMessage || "Transcription failed."}
+              onRetry={live.onRetryTranscription}
+            />
           )}
+          {live?.noteGenerationStatus === "failed" && (
+            <CaptureErrorRow message="Clinical note generation failed." onRetry={live.onRetryNoteGeneration} />
+          )}
+
+          {/* Audio: its own card. The live recording controls morph in place
+              into the playback player once the capture stops. */}
+          {live?.phase === "recording" ? (
+            <RecordingBar
+              duration={live.duration ?? 0}
+              isPaused={Boolean(live.isPaused)}
+              analyser={live.analyser ?? null}
+              onStop={live.onStop ?? (() => undefined)}
+              onPause={live.onPause ?? (() => undefined)}
+              onResume={live.onResume ?? (() => undefined)}
+              stopLabel={recordingOnly ? "Stop recording" : "Stop & generate"}
+              className={cn(CARD, "px-5 py-3.5")}
+            />
+          ) : (
+            <AudioPlayer audioKey={encounter.id} placeholder={Boolean(live)} className={cn(CARD, "px-5 py-3.5")} />
+          )}
+
+          {/* Transcript: a collapsible card. */}
+          <section className={CARD}>
+            <button
+              type="button"
+              onClick={() => transcriptCanOpen && setTranscriptOpen((open) => !open)}
+              disabled={!transcriptCanOpen}
+              aria-expanded={showTranscriptBody}
+              className={cn(
+                "flex w-full items-center gap-2.5 px-5 py-3 text-left",
+                transcriptCanOpen ? "cursor-pointer" : "cursor-default",
+              )}
+            >
+              <h2 className={cn("text-sm font-semibold", transcriptCanOpen ? "text-foreground" : "text-muted-foreground")}>
+                Transcript
+              </h2>
+              {transcriptCanOpen && (
+                <span className="ml-auto text-xs font-medium text-primary">{showTranscriptBody ? "Hide" : "Show"}</span>
+              )}
+            </button>
+            {showTranscriptBody && (
+              <div className={CARD_BODY}>
+                {hasTranscript ? (
+                  <TranscriptView text={encounter.transcript_text} confidence={encounter.transcript_confidence} />
+                ) : (
+                  <TranscriptSkeleton />
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Clinical note: the deliverable, with its own actions. */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}>
+              <h2 className={cn("text-sm font-semibold", noteBody ? "text-foreground" : "text-muted-foreground")}>
+                Clinical note
+              </h2>
+              <div className="ml-auto flex items-center gap-1.5">
+                {noteStage === "active" && (
+                  <span className="inline-flex h-8 items-center gap-2 text-xs font-medium text-primary">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Drafting
+                  </span>
+                )}
+                {hasNote && versions.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowHistory((v) => !v)}
+                      title={
+                        noteArchive === "pending"
+                          ? "Saving this version to the archive…"
+                          : noteArchive === "archived"
+                            ? "This version is saved to the archive"
+                            : noteArchive === "failed"
+                              ? "Archiving this version failed"
+                              : noteArchive === "skipped"
+                                ? "Archiving not configured — stored locally only"
+                                : "Note version history"
+                      }
+                      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <History className="h-3 w-3" />
+                      v{noteVersionNumber}
+                      {noteArchive === "pending" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                      {noteArchive === "archived" && <Check className="h-3 w-3 text-success" />}
+                      {noteArchive === "failed" && <X className="h-3 w-3 text-destructive" />}
+                      <ChevronDown className={cn("h-3 w-3 transition-transform", showHistory && "rotate-180")} />
+                    </button>
+                    {showHistory && (
+                      <div className="absolute right-0 top-9 z-20 w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lifted">
+                        {[...versions].reverse().map((version) => {
+                          const isCurrent = version.version === noteVersionNumber && !viewingVersion
+                          const isViewing = viewingVersion?.version === version.version
+                          return (
+                            <button
+                              key={version.version}
+                              type="button"
+                              onClick={() => {
+                                setViewingVersion(version.version === noteVersionNumber ? null : version)
+                                setShowHistory(false)
+                                setNoteMode("preview")
+                              }}
+                              className={cn(
+                                "flex w-full items-baseline gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+                                (isCurrent || isViewing) && "bg-accent/60",
+                              )}
+                            >
+                              <span className="font-mono text-xs text-foreground">v{version.version}</span>
+                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                                {VERSION_SOURCE_LABELS[version.source]}
+                              </span>
+                              <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
+                                {format(new Date(version.created_at), "HH:mm")}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {showPreviewActions && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={enterEditMode}
+                      title="Edit the note"
+                      className="h-8 rounded-md px-3"
+                    >
+                      <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                      <span className="text-xs">Edit</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => onApprove(noteMarkdown)}
+                      title="File this note to the patient record. The consultation locks after approval."
+                      className="h-8 rounded-md bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
+                    >
+                      <FileCheck className="mr-1.5 h-3.5 w-3.5" />
+                      <span className="text-xs">Approve & file</span>
+                    </Button>
+                  </>
+                )}
+                {showEditingActions && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDiscard}
+                      title="Discard your edits and keep the current version"
+                      className="h-8 rounded-md px-3 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="mr-1.5 h-3.5 w-3.5" />
+                      <span className="text-xs">Discard</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSave}
+                      disabled={!editHasContent()}
+                      title="Save as the next note version"
+                      className="h-8 rounded-md bg-primary px-3 text-primary-foreground shadow-soft hover:bg-brand-strong"
+                    >
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      <span className="text-xs">Save</span>
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+            {noteBody && (
+              <div className={CARD_BODY}>
+                {viewingVersion && (
+                  <div className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-accent/40 px-4 py-2.5">
+                    <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+                      Viewing v{viewingVersion.version} · {VERSION_SOURCE_LABELS[viewingVersion.source]} ·{" "}
+                      {format(new Date(viewingVersion.created_at), "d MMM, HH:mm")} — read-only
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setViewingVersion(null)}
+                      className="h-8 shrink-0 rounded-md px-3"
+                    >
+                      <span className="text-xs">Back to latest</span>
+                    </Button>
+                  </div>
+                )}
+                {noteBody}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>
