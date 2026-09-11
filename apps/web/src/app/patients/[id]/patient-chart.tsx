@@ -6,14 +6,19 @@
  * history accumulated through the integrated scribe. The baseline is
  * deliberately read-only and sparse — presenting complaints and investigation
  * findings surface during consultations, never here (study integrity).
+ *
+ * Laid out as cards in rows: a details card, one equal-height row of the four
+ * record cards, then consultations and observations as tables.
  */
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { format } from "date-fns"
-import { AlertCircle, ArrowLeft, ChevronRight, ClipboardList, Mic, Pill, ShieldAlert, Trash2, Users } from "lucide-react"
+import { ArrowLeft, ChevronRight, Plus, Trash2, Users } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
+import { cn } from "@ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/lib/ui/tooltip"
 import {
   deleteEncounterAudio,
@@ -27,6 +32,12 @@ import type { CodedEntry, Encounter, PatientObservation } from "@storage/types"
 import { ModeBadge, StatusBadge } from "../../consultation-badges"
 import { StartConsultationDialog, useLaunchConsultation } from "../../start-consultation-dialog"
 import { TopBar } from "../../top-bar"
+
+const CARD = "rounded-2xl border border-border bg-card shadow-soft"
+const CARD_HEAD = "border-b border-border px-5 py-2.5"
+const CARD_TITLE = "text-sm font-semibold text-foreground"
+const TH = "py-3 text-left text-xs font-medium text-muted-foreground"
+const ROW = "border-b border-border/60 last:border-0"
 
 /**
  * A coded record entry. The chart reads as the record's own words; the code is
@@ -75,45 +86,42 @@ function CodedText({
   )
 }
 
-function SummaryBlock({
-  title,
-  icon,
-  items,
-  empty,
-  delayMs = 0,
-}: {
-  title: string
-  icon: React.ReactNode
-  items: CodedEntry[]
-  empty: string
-  /** Stagger against the other chart cards, so the record assembles in order. */
-  delayMs?: number
-}) {
+/** One of the four record cards: a title and a short list, or prose. */
+function RecordCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section
-      className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
-      style={{ animationDelay: `${delayMs}ms` }}
-    >
-      <h2 className="mb-3 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-        {icon}
-        {title}
-      </h2>
-      {items.length === 0 ? (
-        <p className="text-sm italic text-muted-foreground">{empty}</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {items.map((item) => (
-            <li key={item.text} className="text-sm leading-relaxed text-foreground">
-              <CodedText entry={item} />
-            </li>
-          ))}
-        </ul>
-      )}
+    <section className={cn(CARD, "flex flex-col")}>
+      <div className="border-b border-border px-4 py-2.5">
+        <h2 className={CARD_TITLE}>{title}</h2>
+      </div>
+      <div className="flex flex-1 flex-col gap-1.5 px-4 py-3">{children}</div>
     </section>
   )
 }
 
+function CodedList({ items, empty }: { items: CodedEntry[]; empty: string }) {
+  if (items.length === 0) return <p className="text-sm italic leading-relaxed text-muted-foreground">{empty}</p>
+  return (
+    <>
+      {items.map((item) => (
+        <p key={item.text} className="text-sm leading-relaxed text-foreground">
+          <CodedText entry={item} />
+        </p>
+      ))}
+    </>
+  )
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm text-foreground">{children}</span>
+    </div>
+  )
+}
+
 function PatientChartContent({ patientId }: { patientId: string }) {
+  const router = useRouter()
   const { encounters, deleteEncounter } = useEncounters()
   const httpsWarning = useHttpsWarning()
   const { launch, starting } = useLaunchConsultation()
@@ -164,184 +172,191 @@ function PatientChartContent({ patientId }: { patientId: string }) {
           onUpload={(_, reason, file) => void launch(patient, reason, { action: "upload", file })}
         />
       )}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
-        <Link
-          href="/"
-          className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Patients
-        </Link>
-
-        {/* Patient banner */}
-        <div className="animate-fade-up rounded-3xl border border-border bg-card p-6 shadow-soft surface">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-soft font-display text-xl font-medium text-primary">
-                {patient.given_name[0]}
-                {patient.family_name[0]}
-              </span>
-              <div>
-                <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">
-                  {patientFullName(patient)}
-                </h1>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span>
-                    {patientAge(patient)} years · {patient.sex === "male" ? "Male" : "Female"}
-                  </span>
-                  <span>Born {format(new Date(`${patient.date_of_birth}T00:00:00`), "d MMM yyyy")}</span>
-                  <span className="font-mono">NHS {formatNhsNumber(patient.nhs_number)}</span>
-                  {patient.address && <span>{patient.address}</span>}
-                  {patient.phone && <span>{patient.phone}</span>}
-                </div>
-              </div>
-            </div>
-            <Button
-              onClick={() => setShowStartDialog(true)}
-              disabled={starting}
-              className="rounded-md bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
-            >
-              <Mic className="mr-2 h-4 w-4" />
-              Start consultation
-            </Button>
-          </div>
-          <p className="mt-4 max-w-3xl text-sm leading-relaxed text-muted-foreground">{patient.summary}</p>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-6 pb-8">
+        {/* One row: back, who, and the way into a consultation. */}
+        <div className="mb-4 flex items-center gap-3 border-b border-border py-2">
+          <Link
+            href="/"
+            title="Back to patients"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <h1 className="font-display text-base font-medium tracking-tight text-foreground">
+            {patientFullName(patient)}
+          </h1>
+          <span className="text-xs text-muted-foreground">
+            {patientAge(patient)} · {patient.sex === "male" ? "Male" : "Female"}
+          </span>
+          <Button
+            onClick={() => setShowStartDialog(true)}
+            disabled={starting}
+            className="ml-auto rounded-md bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            New consultation
+          </Button>
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.5fr]">
-          {/* Left rail: baseline record */}
-          <div className="space-y-4">
-            <SummaryBlock
-              title="Active problems"
-              delayMs={60}
-              icon={<AlertCircle className="h-3.5 w-3.5" />}
-              items={patient.past_history}
-              empty="No active problems recorded."
-            />
-            <SummaryBlock
-              title="Medications"
-              delayMs={110}
-              icon={<Pill className="h-3.5 w-3.5" />}
-              items={patient.medications}
-              empty="No regular medications."
-            />
-            <SummaryBlock
-              title="Allergies"
-              delayMs={160}
-              icon={<ShieldAlert className="h-3.5 w-3.5" />}
-              items={patient.allergies}
-              empty="None recorded."
-            />
-            <section
-              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
-              style={{ animationDelay: "210ms" }}
-            >
-              <h2 className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                Social history
-              </h2>
-              <p className="text-sm leading-relaxed text-foreground">
-                {patient.social_history || <span className="italic text-muted-foreground">Not recorded.</span>}
+        <div className="flex flex-col gap-3">
+          {/* Details */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}>
+              <h2 className={CARD_TITLE}>Details</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-4 px-5 py-3.5 sm:grid-cols-4">
+              <Fact label="Born">{format(new Date(`${patient.date_of_birth}T00:00:00`), "d MMM yyyy")}</Fact>
+              <Fact label="NHS number">
+                <span className="font-mono text-[13px]">{formatNhsNumber(patient.nhs_number)}</span>
+              </Fact>
+              <Fact label="Address">{patient.address || "—"}</Fact>
+              <Fact label="Phone">{patient.phone || "—"}</Fact>
+            </div>
+            <div className="border-t border-border/60 px-5 py-3">
+              <p className="text-sm leading-relaxed text-foreground">{patient.summary}</p>
+            </div>
+          </section>
+
+          {/* Record: one row, equal heights */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <RecordCard title="Problems">
+              <CodedList items={patient.past_history} empty="No active problems recorded." />
+            </RecordCard>
+            <RecordCard title="Medications">
+              <CodedList items={patient.medications} empty="No regular medications." />
+            </RecordCard>
+            <RecordCard title="Allergies">
+              <CodedList items={patient.allergies} empty="None recorded." />
+            </RecordCard>
+            <RecordCard title="Social history">
+              {patient.social_history ? (
+                <p className="text-sm leading-relaxed text-foreground">{patient.social_history}</p>
+              ) : (
+                <p className="text-sm italic leading-relaxed text-muted-foreground">Not recorded.</p>
+              )}
+            </RecordCard>
+          </div>
+
+          {/* Consultations */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}>
+              <h2 className={CARD_TITLE}>Consultations</h2>
+            </div>
+            {consultations.length === 0 ? (
+              <p className="px-5 py-6 text-center text-sm italic text-muted-foreground">
+                No consultations yet. Start one to record this patient's first visit.
               </p>
-            </section>
-          </div>
-
-          {/* Right rail: consultations + observations */}
-          <div className="space-y-4">
-            <section
-              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
-              style={{ animationDelay: "90ms" }}
-            >
-              <h2 className="mb-3 flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                <ClipboardList className="h-3.5 w-3.5" />
-                Consultations
-              </h2>
-              {consultations.length === 0 ? (
-                <p className="py-6 text-center text-sm italic text-muted-foreground">
-                  No consultations yet. Start one to record this patient's first visit.
-                </p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {consultations.map((consultation: Encounter) => {
-                    return (
-                      <li key={consultation.id} className="group relative">
-                        <Link
-                          href={`/consultations/${consultation.id}`}
-                          className="flex items-center gap-3 rounded-xl border border-transparent p-3 pr-10 transition-colors hover:border-border hover:bg-accent/40"
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className={cn(TH, "px-5")}>When</th>
+                      <th className={cn(TH, "px-3")}>Reason</th>
+                      <th className={cn(TH, "px-3")}>Mode</th>
+                      <th className={cn(TH, "px-3")}>Status</th>
+                      <th className="px-3 py-3">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {consultations.map((consultation: Encounter) => {
+                      const href = `/consultations/${consultation.id}`
+                      return (
+                        <tr
+                          key={consultation.id}
+                          onClick={() => router.push(href)}
+                          className={cn(ROW, "group cursor-pointer transition-colors hover:bg-accent/40")}
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-medium text-foreground">
-                                {format(new Date(consultation.created_at), "d MMM yyyy 'at' HH:mm")}
-                              </p>
-                              <StatusBadge encounter={consultation} />
-                              <ModeBadge mode={consultation.mode} />
+                          <td className="whitespace-nowrap px-5 py-2.5">
+                            <Link
+                              href={href}
+                              onClick={(e) => e.stopPropagation()}
+                              className="font-medium text-foreground hover:text-primary"
+                            >
+                              {format(new Date(consultation.created_at), "d MMM yyyy")}
+                            </Link>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {format(new Date(consultation.created_at), "HH:mm")}
+                            </span>
+                          </td>
+                          <td className="max-w-xs truncate px-3 py-2.5 text-muted-foreground">
+                            {consultation.visit_reason || "No reason recorded"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5">
+                            <ModeBadge mode={consultation.mode} />
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5">
+                            <StatusBadge encounter={consultation} />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center justify-end gap-1">
+                              {consultation.approval_status !== "approved" && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void handleDelete(consultation.id)
+                                  }}
+                                  aria-label="Delete consultation"
+                                  title="Delete consultation"
+                                  className="rounded-md p-1.5 text-muted-foreground/60 opacity-0 transition-all group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
                             </div>
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {consultation.visit_reason || "No reason recorded"}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
-                        </Link>
-                        {consultation.approval_status !== "approved" && (
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(consultation.id)}
-                            aria-label="Delete consultation"
-                            title="Delete consultation"
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-muted-foreground/60 opacity-0 transition-all group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </section>
-
-            <section
-              className="animate-rise rounded-2xl border border-border bg-card p-5 shadow-soft surface"
-              style={{ animationDelay: "140ms" }}
-            >
-              <h2 className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">
-                Observations
-              </h2>
-              {observations.length === 0 ? (
-                <p className="py-4 text-center text-sm italic text-muted-foreground">No observations on record.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                        <th className="pb-2 pr-4 font-medium">Date</th>
-                        <th className="pb-2 pr-4 font-medium">Observation</th>
-                        <th className="pb-2 pr-4 font-medium">Value</th>
-                        <th className="pb-2 font-medium">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {observations.map((obs) => (
-                        <tr key={obs.id} className="border-b border-border/60 last:border-0">
-                          <td className="py-2.5 pr-4 whitespace-nowrap text-muted-foreground">
-                            {format(new Date(`${obs.date}T00:00:00`), "d MMM yyyy")}
                           </td>
-                          <td className="py-2.5 pr-4 text-foreground">
-                            <CodedText entry={{ text: obs.name, code: obs.code }} components={obs.components} />
-                          </td>
-                          <td className="py-2.5 pr-4 whitespace-nowrap font-mono text-xs text-foreground">
-                            {obs.value}
-                            {obs.unit ? ` ${obs.unit}` : ""}
-                          </td>
-                          <td className="py-2.5 text-xs text-muted-foreground">{obs.notes || "—"}</td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </div>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Observations */}
+          <section className={CARD}>
+            <div className={CARD_HEAD}>
+              <h2 className={CARD_TITLE}>Observations</h2>
+            </div>
+            {observations.length === 0 ? (
+              <p className="px-5 py-6 text-center text-sm italic text-muted-foreground">No observations on record.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className={cn(TH, "px-5")}>Date</th>
+                      <th className={cn(TH, "px-3")}>Observation</th>
+                      <th className={cn(TH, "px-3")}>Value</th>
+                      <th className={cn(TH, "px-3")}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {observations.map((obs) => (
+                      <tr key={obs.id} className={ROW}>
+                        <td className="whitespace-nowrap px-5 py-2.5 text-muted-foreground">
+                          {format(new Date(`${obs.date}T00:00:00`), "d MMM yyyy")}
+                        </td>
+                        <td className="px-3 py-2.5 text-foreground">
+                          <CodedText entry={{ text: obs.name, code: obs.code }} components={obs.components} />
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-foreground">
+                          {obs.value}
+                          {obs.unit ? ` ${obs.unit}` : ""}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">{obs.notes || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       </main>
     </div>
