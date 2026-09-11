@@ -6,10 +6,12 @@
  * transcription / note-generation flow that used to live in the app's single
  * page, now bound to a chart patient and reached at /consultations/[id].
  *
- * Lifecycle: the encounter is created from the patient chart (mode + reason
- * chosen there); this page starts in a ready state (record or upload), runs
- * the capture pipeline, and hands the result to the note editor for editing
- * and approval. Approving files the note back to the patient's chart.
+ * Lifecycle: the encounter is created from the patient chart or the
+ * consultations tab (mode + reason chosen there; the latter may leave it
+ * untied from any patient); this page starts in a ready state (record or
+ * upload), runs the capture pipeline, and hands the result to the note editor
+ * for editing and approval. Approving files the note back to the patient's
+ * chart, or just to the consultations list when there is no patient.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
@@ -1073,8 +1075,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             <>
               <FileQuestion className="h-10 w-10 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">This consultation does not exist on this device.</p>
-              <Link href="/" className="text-sm font-medium text-primary hover:underline">
-                Back to patients
+              <Link href="/consultations" className="text-sm font-medium text-primary hover:underline">
+                Back to consultations
               </Link>
             </>
           ) : (
@@ -1085,7 +1087,12 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     )
   }
 
+  // Where "back" goes: the patient's chart when there is one, otherwise the
+  // consultations tab (the only place an untied consultation is listed).
   const patient = getPatient(encounter.patient_id)
+  const back = patient
+    ? { href: `/patients/${patient.id}`, label: `${encounter.patient_name}'s chart` }
+    : { href: "/consultations", label: "Consultations" }
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const hasNote = Boolean(encounter.note_text?.trim())
   const showReady = !live && !hasTranscript && !hasNote
@@ -1128,11 +1135,11 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
           <>
             <div className="shrink-0 border-b border-border bg-card/50 px-8 py-2">
               <Link
-                href={patient ? `/patients/${patient.id}` : "/"}
+                href={back.href}
                 className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
-                {patient ? `${encounter.patient_name}'s chart` : "Patients"}
+                {back.label}
               </Link>
             </div>
             <ReadyPanel
@@ -1149,8 +1156,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             live={liveState}
             backLink={
               <Link
-                href={patient ? `/patients/${patient.id}` : "/"}
-                title={patient ? `Back to ${encounter.patient_name}'s chart` : "Back to patients"}
+                href={back.href}
+                title={`Back to ${back.label}`}
                 className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <ArrowLeft className="h-4 w-4" />

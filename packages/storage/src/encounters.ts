@@ -48,6 +48,15 @@ export function deleteEncounter(encounters: Encounter[], id: string): Encounter[
 }
 
 /**
+ * Whether the consultation is tied to a patient record. An empty patient_id
+ * is the one representation of "no patient", so every consumer (lists, the
+ * workspace's back link, the note header) agrees on it.
+ */
+export function isLinkedToPatient(encounter: Pick<Encounter, "patient_id">): boolean {
+  return encounter.patient_id.trim().length > 0
+}
+
+/**
  * The encounter's note trail. Encounters saved before note_versions existed
  * carry only note_text/note_version; reconstruct a single-entry trail from
  * those so the first new save extends it rather than losing history.

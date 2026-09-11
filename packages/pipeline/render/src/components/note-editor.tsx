@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import type { Encounter, NoteVersion } from "@storage/types"
-import { getPatient, formatNhsNumber, noteVersionsOf } from "@storage"
+import { getPatient, formatNhsNumber, isLinkedToPatient, noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
 import { Badge } from "@ui/lib/ui/badge"
@@ -145,6 +145,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   const hasNote = Boolean(encounter.note_text?.trim())
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const versions = noteVersionsOf(encounter)
+  const linked = isLinkedToPatient(encounter)
   const patient = getPatient(encounter.patient_id)
 
   const [activeTab, setActiveTab] = useState<TabType>(hasNote ? "note" : "capture")
@@ -309,8 +310,13 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
         {/* Single compact row: back navigation + identity on the left. */}
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           {backLink}
-          <h2 className="font-display truncate text-base font-medium tracking-tight text-foreground">
-            {encounter.patient_name || "Unknown Patient"}
+          <h2
+            className={cn(
+              "font-display truncate text-base font-medium tracking-tight",
+              linked ? "text-foreground" : "italic text-muted-foreground",
+            )}
+          >
+            {linked ? encounter.patient_name || "Unknown Patient" : "No patient"}
           </h2>
           {(patient || encounter.patient_id) && (
             <Badge

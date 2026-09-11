@@ -111,7 +111,12 @@ export type ApprovalStatus = "draft" | "approved"
 export interface Encounter {
   id: string
   patient_name: string
-  /** Id of the seeded Patient this consultation belongs to (see patients.ts). */
+  /**
+   * Id of the seeded Patient this consultation belongs to (see patients.ts).
+   * Empty when the consultation was started untied from any patient (the
+   * consultations tab with "No patient" chosen); patient_name is then empty
+   * too. See isLinkedToPatient().
+   */
   patient_id: string
   visit_reason: string
   session_id?: string

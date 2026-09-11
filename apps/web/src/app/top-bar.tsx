@@ -1,22 +1,38 @@
 "use client"
 
 /**
- * Shared EPR chrome: brand, patient-register navigation, and the settings
- * entry point. Owns the settings dialog and its microphone/device plumbing so
- * every page (patient list, chart, consultation workspace) gets settings —
- * including BYOK key entry — without re-wiring audio state.
+ * Shared EPR chrome: brand, the two top-level tabs (patients, consultations),
+ * and the settings entry point. Owns the settings dialog and its
+ * microphone/device plumbing so every page (register, chart, consultations
+ * table, consultation workspace) gets settings — including BYOK key entry —
+ * without re-wiring audio state.
  */
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { Settings, Stethoscope } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
+import { cn } from "@ui/lib/utils"
 import { SettingsDialog } from "@ui"
 import { warmupMicrophonePermission } from "@audio"
 import { getPreferences, setPreferences, debugWarn, initializeAuditLog } from "@storage"
 import type { EncounterMode } from "@storage/types"
 
+/**
+ * Which tab a route belongs to. The chart sits under Patients and the
+ * workspace under Consultations, so the active tab tells the clinician which
+ * list "back" returns to.
+ */
+function navTabs(pathname: string) {
+  return [
+    { href: "/", label: "Patients", active: pathname === "/" || pathname.startsWith("/patients") },
+    { href: "/consultations", label: "Consultations", active: pathname.startsWith("/consultations") },
+  ]
+}
+
 export function TopBar() {
+  const pathname = usePathname() ?? "/"
   const [showSettings, setShowSettings] = useState(false)
   const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
@@ -107,17 +123,21 @@ export function TopBar() {
                 <Stethoscope className="h-4 w-4" />
               </span>
               <span className="font-display text-lg font-medium tracking-tight text-foreground">DiSCaScribe</span>
-              <span className="rounded-full border border-border px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                EPR
-              </span>
             </Link>
             <nav className="flex items-center gap-1 text-sm">
-              <Link
-                href="/"
-                className="rounded-full px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                Patients
-              </Link>
+              {navTabs(pathname).map((tab) => (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={tab.active ? "page" : undefined}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 transition-colors hover:bg-accent hover:text-foreground",
+                    tab.active ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {tab.label}
+                </Link>
+              ))}
             </nav>
           </div>
           <Button
