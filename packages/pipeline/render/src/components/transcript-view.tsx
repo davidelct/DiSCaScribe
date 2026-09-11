@@ -1,5 +1,6 @@
 "use client"
 
+import { Fragment } from "react"
 import { cn } from "@ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/lib/ui/tooltip"
 import {
@@ -7,12 +8,20 @@ import {
   lowConfidenceRangesFor,
   parseDiarizedTranscript,
   type TranscriptMarkRange,
+  type TranscriptTurn,
   type TranscriptWordSpan,
 } from "@pipeline-errors"
 
 // Re-exported for consumers that step through turns (e.g. stimulated recall).
 export { parseDiarizedTranscript }
 export type { TranscriptSegment, TranscriptTurn } from "@pipeline-errors"
+
+/**
+ * The transcript as a script: speaker in a fixed gutter, the words in one
+ * column beside it. Reads down like a page rather than across like a chat,
+ * so a clinician can skim one speaker's turns down the gutter and a long
+ * consultation stays short on screen.
+ */
 
 interface TranscriptViewProps {
   text: string
@@ -33,35 +42,22 @@ function resolveDefaultThreshold(): number {
     : DEFAULT_LOW_CONFIDENCE_THRESHOLD
 }
 
-// Theme-aware accents cycled per speaker index. Kept within the blue family
-// to match the clinical palette; ordered so the first two speakers (typically
-// clinician/patient) get the highest-contrast pair.
-const SPEAKER_STYLES = [
-  {
-    label: "text-blue-600 dark:text-blue-400",
-    bubble: "bg-blue-50 border-blue-200/70 dark:bg-blue-500/10 dark:border-blue-500/20",
-  },
-  {
-    label: "text-indigo-600 dark:text-indigo-400",
-    bubble: "bg-indigo-50 border-indigo-200/70 dark:bg-indigo-500/10 dark:border-indigo-500/20",
-  },
-  {
-    label: "text-sky-600 dark:text-sky-400",
-    bubble: "bg-sky-50 border-sky-200/70 dark:bg-sky-500/10 dark:border-sky-500/20",
-  },
-  {
-    label: "text-cyan-600 dark:text-cyan-400",
-    bubble: "bg-cyan-50 border-cyan-200/70 dark:bg-cyan-500/10 dark:border-cyan-500/20",
-  },
-] as const
+// Speaker label colours. The first speaker (usually the clinician) takes the
+// brand accent and the second reads in ink; any further speakers cycle through
+// the semantic hues so they stay distinguishable without new colours.
+const SPEAKER_LABEL = ["text-primary", "text-foreground/75", "text-success", "text-warning-foreground"] as const
 
-function speakerStyle(speaker: number) {
-  return SPEAKER_STYLES[((speaker % SPEAKER_STYLES.length) + SPEAKER_STYLES.length) % SPEAKER_STYLES.length]
+function speakerLabelClass(speaker: number): string {
+  return SPEAKER_LABEL[((speaker % SPEAKER_LABEL.length) + SPEAKER_LABEL.length) % SPEAKER_LABEL.length]
 }
 
+// A dotted underline and nothing else: the word stays legible in its
+// sentence, and the header counts the marks so none is missed.
 const LOW_CONFIDENCE_MARK =
-  "rounded-[3px] bg-amber-100/80 px-0.5 text-amber-900 underline decoration-amber-500 decoration-dotted " +
-  "decoration-2 underline-offset-[3px] dark:bg-amber-400/15 dark:text-amber-200 dark:decoration-amber-400"
+  "bg-transparent text-inherit underline decoration-amber-600 decoration-dotted decoration-2 " +
+  "underline-offset-[3px] dark:decoration-amber-400"
+
+const TURN_TEXT = "m-0 text-[15px] leading-6 text-foreground"
 
 /**
  * One uncertain word. Focusable so the tooltip is reachable by keyboard, not
@@ -111,6 +107,32 @@ function MarkedText({ text, ranges }: { text: string; ranges: TranscriptMarkRang
   return <>{parts}</>
 }
 
+/**
+ * The line above the turns: what this is, how many voices, and how many
+ * words the scribe was unsure of — so the check is a count to work through,
+ * not a hunt for underlines.
+ */
+function MetaRow({ speakers, uncertain }: { speakers: number; uncertain: number }) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3">
+      <div className="flex items-baseline gap-2.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Transcript</span>
+        {speakers > 0 && (
+          <span className="text-xs text-muted-foreground">
+            {speakers} speaker{speakers === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+      {uncertain > 0 && (
+        <span className="flex h-[22px] items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-foreground">
+          <span aria-hidden className="inline-block h-2 w-3.5 border-b-2 border-dotted border-amber-600 dark:border-amber-400" />
+          {uncertain} word{uncertain === 1 ? "" : "s"} to check
+        </span>
+      )}
+    </div>
+  )
+}
+
 function TranscriptViewContent({ text, confidence, lowConfidenceThreshold }: TranscriptViewProps) {
   const source = text ?? ""
   const trimmed = source.trim()
@@ -133,76 +155,69 @@ function TranscriptViewContent({ text, confidence, lowConfidenceThreshold }: Tra
   }))
   const turns = parseDiarizedTranscript(trimmed)
 
-  // Not diarized: preserve the original plain rendering.
+  // Not diarized: one block of prose, still marked.
   if (!turns || turns.length === 0) {
     const ranges = spans
       .filter((span) => span.confidence < threshold && span.start >= 0 && span.end <= trimmed.length)
       .map((span) => ({ start: span.start, end: span.end, confidence: span.confidence }))
       .sort((a, b) => a.start - b.start)
     return (
-      <div className="space-y-4">
-        <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+      <div>
+        <MetaRow speakers={0} uncertain={ranges.length} />
+        <p className={cn(TURN_TEXT, "whitespace-pre-wrap")}>
           <MarkedText text={trimmed} ranges={ranges} />
-        </pre>
+        </p>
       </div>
     )
   }
 
-  const distinctSpeakers = Array.from(new Set(turns.map((turn) => turn.speaker))).sort((a, b) => a - b)
+  const marked: Array<{ turn: TranscriptTurn; ranges: TranscriptMarkRange[] }> = turns.map((turn) => ({
+    turn,
+    ranges: lowConfidenceRangesFor(turn, spans, threshold),
+  }))
+  const uncertain = marked.reduce((count, entry) => count + entry.ranges.length, 0)
+  const speakers = new Set(turns.map((turn) => turn.speaker)).size
 
-  // Single speaker: labels/bubbles would be noise — render as plain prose.
-  if (distinctSpeakers.length <= 1) {
+  // Single speaker: a gutter would label every line the same — plain prose.
+  if (speakers <= 1) {
     return (
-      <div className="space-y-4">
-        {turns.map((turn, index) => (
-          <p key={index} className="text-[0.95rem] leading-7 text-foreground/85">
-            <MarkedText text={turn.text} ranges={lowConfidenceRangesFor(turn, spans, threshold)} />
-          </p>
-        ))}
+      <div>
+        <MetaRow speakers={1} uncertain={uncertain} />
+        <div className="space-y-2.5">
+          {marked.map(({ turn, ranges }, index) => (
+            <p key={index} className={TURN_TEXT}>
+              <MarkedText text={turn.text} ranges={ranges} />
+            </p>
+          ))}
+        </div>
       </div>
     )
   }
-
-  // Chat-style layout: alternate sides for the first two speakers; extra
-  // speakers stay left-aligned and are distinguished by color.
-  const speakerSide = new Map<number, "left" | "right">()
-  distinctSpeakers.forEach((speaker, index) => speakerSide.set(speaker, index % 2 === 1 ? "right" : "left"))
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-4">
-        {turns.map((turn, index) => {
-          const style = speakerStyle(turn.speaker)
-          const isRight = speakerSide.get(turn.speaker) === "right"
+    <div>
+      <MetaRow speakers={speakers} uncertain={uncertain} />
+      <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-4 gap-y-2.5">
+        {marked.map(({ turn, ranges }, index) => {
           const showLabel = index === 0 || turns[index - 1].speaker !== turn.speaker
+          // Capped so a long consultation still lands in under half a second —
+          // the stagger is a settling cue, not a reveal.
+          const delay = `${Math.min(index, 8) * 40}ms`
           return (
-            <div
-              key={`${turn.speaker}-${index}`}
-              className={cn(
-                "flex flex-col",
-                // Each turn arrives from the side it sits on, so the exchange
-                // reads as two people rather than one column of blocks.
-                isRight ? "animate-enter-right items-end" : "animate-enter-left items-start",
-              )}
-              // Capped so a long consultation still lands in under half a
-              // second — the stagger is a settling cue, not a reveal.
-              style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
-            >
-              {showLabel && (
-                <span className={cn("mb-1 px-1 text-xs font-semibold uppercase tracking-wide", style.label)}>
-                  Speaker {turn.speaker + 1}
-                </span>
-              )}
+            <Fragment key={`${turn.speaker}-${index}`}>
               <div
                 className={cn(
-                  "max-w-[85%] rounded-2xl border px-4 py-2.5 text-[0.95rem] leading-7 text-foreground shadow-soft",
-                  style.bubble,
-                  isRight ? "rounded-tr-sm" : "rounded-tl-sm",
+                  "animate-rise whitespace-nowrap pt-[5px] text-[11px] font-semibold uppercase tracking-[0.06em]",
+                  speakerLabelClass(turn.speaker),
                 )}
+                style={{ animationDelay: delay }}
               >
-                <MarkedText text={turn.text} ranges={lowConfidenceRangesFor(turn, spans, threshold)} />
+                {showLabel ? `Speaker ${turn.speaker + 1}` : ""}
               </div>
-            </div>
+              <p className={cn("animate-rise", TURN_TEXT)} style={{ animationDelay: delay }}>
+                <MarkedText text={turn.text} ranges={ranges} />
+              </p>
+            </Fragment>
           )
         })}
       </div>

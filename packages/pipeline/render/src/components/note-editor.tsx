@@ -462,7 +462,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("mx-auto w-full px-6 py-4", activeTab === "recall" ? "max-w-6xl" : "max-w-3xl")}>
+        <div className={cn("mx-auto w-full px-6 py-4", activeTab === "note" ? "max-w-3xl" : "max-w-6xl")}>
           {/* Panels stay mounted and hide via CSS, so the audio player (and its
               playback position) survives tab switches without remount flicker. */}
           <div className={cn("flex flex-col gap-4", activeTab !== "capture" && "hidden")}>
@@ -475,7 +475,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
             {live?.noteGenerationStatus === "failed" && (
               <CaptureErrorRow message="Clinical note generation failed." onRetry={live.onRetryNoteGeneration} />
             )}
-            <div className="min-h-[480px] rounded-2xl border border-border bg-card p-7 shadow-soft">
+            <div className="min-h-[480px] rounded-2xl border border-border bg-card p-6 shadow-soft">
               {/* The audio strip stays fixed at the top of the card: the live
                   recording controls morph in place into the playback player. */}
               {live?.phase === "recording" ? (
@@ -487,13 +487,13 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                   onPause={live.onPause ?? (() => undefined)}
                   onResume={live.onResume ?? (() => undefined)}
                   stopLabel={recordingOnly ? "Stop recording" : "Stop & generate"}
-                  className="mb-5 border-b border-border pb-5"
+                  className="mb-4 border-b border-border pb-4"
                 />
               ) : (
                 <AudioPlayer
                   audioKey={encounter.id}
                   placeholder={Boolean(live)}
-                  className="mb-5 border-b border-border pb-5"
+                  className="mb-4 border-b border-border pb-4"
                 />
               )}
               {hasTranscript ? (
