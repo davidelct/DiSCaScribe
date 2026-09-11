@@ -25,7 +25,6 @@ import { TranscriptSkeleton } from "./transcript-skeleton"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
 import { parseNoteSections, type NoteSection } from "../note-sections"
-import { StimulatedRecallView } from "./stimulated-recall-view"
 
 export type CaptureStepStatus = "pending" | "in-progress" | "done" | "failed"
 
@@ -63,7 +62,7 @@ interface NoteEditorProps {
   backLink?: ReactNode
 }
 
-type TabType = "capture" | "note" | "recall"
+type TabType = "capture" | "note"
 
 const SOAP_TITLES = ["Subjective", "Objective", "Assessment", "Plan"]
 
@@ -192,7 +191,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   // writing one manually (recording-only arm, or a failed generation) — once
   // capture has finished and delivered a transcript.
   const noteEnabled = hasNote || (hasTranscript && !live)
-  const recallEnabled = hasTranscript && (recordingOnly || hasNote)
 
   const noteVersionNumber = encounter.note_version ?? 0
   // Encounters archived before per-note status existed fall back to the
@@ -348,7 +346,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
           <div className="flex gap-1">
             {tabButton("capture", "Capture", true, captureStatus)}
             {tabButton("note", "Clinical Note", noteEnabled, noteStatus)}
-            {tabButton("recall", "Stimulated Recall", recallEnabled)}
           </div>
 
           <div className="flex items-center gap-1 pb-2">
@@ -462,9 +459,8 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* One width for every tab: the transcript, the note and the recall
-            view are all working surfaces, and switching between them must
-            not reflow the page. */}
+        {/* One width for both tabs: the transcript and the note are working
+            surfaces, and switching between them must not reflow the page. */}
         <div className="mx-auto w-full max-w-6xl px-6 py-4">
           {/* Panels stay mounted and hide via CSS, so the audio player (and its
               playback position) survives tab switches without remount flicker. */}
@@ -598,11 +594,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                   </Button>
                 </div>
               )}
-            </div>
-          )}
-          {recallEnabled && (
-            <div className={cn(activeTab !== "recall" && "hidden")}>
-              <StimulatedRecallView encounter={encounter} />
             </div>
           )}
         </div>

@@ -101,6 +101,32 @@ export function recallAudioKey(encounterId: string): string {
   return `recall:${encounterId}`
 }
 
+export interface RecallSessionSummary {
+  hypotheses: number
+  rated: number
+  /** The recall interview has been recorded (audio on this device, or a finished timeline). */
+  recorded: boolean
+  archivedAt?: string
+}
+
+/**
+ * Where a consultation's recall interview stands, for the recall list:
+ * whether it has been started, how far the ratings got, and whether it has
+ * been recorded and archived. Reads the same stores the view persists to.
+ */
+export async function getRecallSessionSummary(encounterId: string): Promise<RecallSessionSummary> {
+  const [saved, audio] = await Promise.all([
+    loadSecureItem<RecallSession>(storageKey(encounterId)),
+    getEncounterAudio(recallAudioKey(encounterId)),
+  ])
+  return {
+    hypotheses: saved?.hypotheses?.length ?? 0,
+    rated: saved ? Object.keys(saved.ratings ?? {}).length : 0,
+    recorded: Boolean(audio) || Boolean(saved?.timeline?.stoppedAt),
+    archivedAt: saved?.recallArchivedAt,
+  }
+}
+
 /**
  * Utterances to step through. Diarised transcripts give real speaker turns;
  * plain transcripts fall back to sentence-ish chunks so the flow still works.

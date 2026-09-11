@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * Shared EPR chrome: brand, the two top-level tabs (patients, consultations),
- * and the settings entry point. Owns the settings dialog and its
+ * Shared EPR chrome: brand, the three top-level tabs (patients,
+ * consultations, stimulated recall), and the settings entry point. Owns the settings dialog and its
  * microphone/device plumbing so every page (register, chart, consultations
  * table, consultation workspace) gets settings — including BYOK key entry —
  * without re-wiring audio state.
@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { AudioLines, ClipboardList, Settings, Users, type LucideIcon } from "lucide-react"
+import { AudioLines, ClipboardList, MessageSquareQuote, Settings, Users, type LucideIcon } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
 import { SettingsDialog } from "@ui"
@@ -20,9 +20,9 @@ import { getPreferences, setPreferences, debugWarn, initializeAuditLog } from "@
 import type { EncounterMode } from "@storage/types"
 
 /**
- * Which tab a route belongs to. The chart sits under Patients and the
- * workspace under Consultations, so the active tab tells the clinician which
- * list "back" returns to.
+ * Which tab a route belongs to. The chart sits under Patients, the workspace
+ * under Consultations and a recall interview under Stimulated recall, so the
+ * active tab tells the clinician which list "back" returns to.
  */
 function navTabs(pathname: string): Array<{ href: string; label: string; icon: LucideIcon; active: boolean }> {
   return [
@@ -32,6 +32,12 @@ function navTabs(pathname: string): Array<{ href: string; label: string; icon: L
       label: "Consultations",
       icon: ClipboardList,
       active: pathname.startsWith("/consultations"),
+    },
+    {
+      href: "/recall",
+      label: "Stimulated recall",
+      icon: MessageSquareQuote,
+      active: pathname.startsWith("/recall"),
     },
   ]
 }

@@ -2,9 +2,10 @@
 
 /**
  * The consultation workspace: one consultation, from first recorded word to
- * the filed note and the stimulated-recall interview. This is the recording /
- * transcription / note-generation flow that used to live in the app's single
- * page, now bound to a chart patient and reached at /consultations/[id].
+ * the filed note. This is the recording / transcription / note-generation
+ * flow that used to live in the app's single page, now reached at
+ * /consultations/[id]. The stimulated-recall interview has its own tab
+ * (/recall) and is not part of this view.
  *
  * Lifecycle: the encounter is created from the patient chart or the
  * consultations tab (mode + reason chosen there; the latter may leave it
