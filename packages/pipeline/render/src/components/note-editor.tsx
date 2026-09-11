@@ -377,6 +377,17 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   const transcriptCanOpen = hasTranscript || transcriptStage === "active"
   const showTranscriptBody = transcriptCanOpen && transcriptOpen
 
+  // In the scribed arm a note is on its way from the moment processing starts,
+  // so its shape shows while the transcript is still being made, not only
+  // once generation itself begins. Nothing is expected after a failure, or
+  // in the recording-only arm.
+  const noteExpected =
+    !recordingOnly &&
+    !hasNote &&
+    live?.phase === "processing" &&
+    live.transcriptionStatus !== "failed" &&
+    noteStage !== "failed"
+
   const showEditingActions = noteMode === "edit"
   const showPreviewActions = hasNote && noteMode === "preview" && !approved && !viewingVersion
 
@@ -418,7 +429,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       )
     }
     if (hasNote) return <SectionedNote source={displayedNote} />
-    if (noteStage === "active") return <NoteSkeleton />
+    if (noteExpected) return <NoteSkeleton />
     if (noteEnabled) {
       return (
         <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
