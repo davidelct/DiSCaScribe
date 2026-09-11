@@ -462,7 +462,10 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("mx-auto w-full px-6 py-4", activeTab === "note" ? "max-w-3xl" : "max-w-6xl")}>
+        {/* One width for every tab: the transcript, the note and the recall
+            view are all working surfaces, and switching between them must
+            not reflow the page. */}
+        <div className="mx-auto w-full max-w-6xl px-6 py-4">
           {/* Panels stay mounted and hide via CSS, so the audio player (and its
               playback position) survives tab switches without remount flicker. */}
           <div className={cn("flex flex-col gap-4", activeTab !== "capture" && "hidden")}>
@@ -575,7 +578,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                   />
                 )
               ) : hasNote ? (
-                <div className="min-h-[640px] rounded-2xl border border-border bg-card p-6 shadow-soft sm:p-8">
+                <div className="min-h-[640px] rounded-2xl border border-border bg-card p-6 shadow-soft">
                   <SectionedNote source={displayedNote} />
                 </div>
               ) : (

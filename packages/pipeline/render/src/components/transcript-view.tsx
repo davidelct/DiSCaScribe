@@ -51,8 +51,8 @@ function speakerLabelClass(speaker: number): string {
   return SPEAKER_LABEL[((speaker % SPEAKER_LABEL.length) + SPEAKER_LABEL.length) % SPEAKER_LABEL.length]
 }
 
-// A dotted underline and nothing else: the word stays legible in its
-// sentence, and the header counts the marks so none is missed.
+// A dotted underline and nothing else, so the word stays legible in its
+// sentence; the tooltip carries the confidence.
 const LOW_CONFIDENCE_MARK =
   "bg-transparent text-inherit underline decoration-amber-600 decoration-dotted decoration-2 " +
   "underline-offset-[3px] dark:decoration-amber-400"
@@ -107,32 +107,6 @@ function MarkedText({ text, ranges }: { text: string; ranges: TranscriptMarkRang
   return <>{parts}</>
 }
 
-/**
- * The line above the turns: what this is, how many voices, and how many
- * words the scribe was unsure of — so the check is a count to work through,
- * not a hunt for underlines.
- */
-function MetaRow({ speakers, uncertain }: { speakers: number; uncertain: number }) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3">
-      <div className="flex items-baseline gap-2.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Transcript</span>
-        {speakers > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {speakers} speaker{speakers === 1 ? "" : "s"}
-          </span>
-        )}
-      </div>
-      {uncertain > 0 && (
-        <span className="flex h-[22px] items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-foreground">
-          <span aria-hidden className="inline-block h-2 w-3.5 border-b-2 border-dotted border-amber-600 dark:border-amber-400" />
-          {uncertain} word{uncertain === 1 ? "" : "s"} to check
-        </span>
-      )}
-    </div>
-  )
-}
-
 function TranscriptViewContent({ text, confidence, lowConfidenceThreshold }: TranscriptViewProps) {
   const source = text ?? ""
   const trimmed = source.trim()
@@ -162,12 +136,9 @@ function TranscriptViewContent({ text, confidence, lowConfidenceThreshold }: Tra
       .map((span) => ({ start: span.start, end: span.end, confidence: span.confidence }))
       .sort((a, b) => a.start - b.start)
     return (
-      <div>
-        <MetaRow speakers={0} uncertain={ranges.length} />
-        <p className={cn(TURN_TEXT, "whitespace-pre-wrap")}>
-          <MarkedText text={trimmed} ranges={ranges} />
-        </p>
-      </div>
+      <p className={cn(TURN_TEXT, "whitespace-pre-wrap")}>
+        <MarkedText text={trimmed} ranges={ranges} />
+      </p>
     )
   }
 
@@ -175,52 +146,45 @@ function TranscriptViewContent({ text, confidence, lowConfidenceThreshold }: Tra
     turn,
     ranges: lowConfidenceRangesFor(turn, spans, threshold),
   }))
-  const uncertain = marked.reduce((count, entry) => count + entry.ranges.length, 0)
   const speakers = new Set(turns.map((turn) => turn.speaker)).size
 
   // Single speaker: a gutter would label every line the same — plain prose.
   if (speakers <= 1) {
     return (
-      <div>
-        <MetaRow speakers={1} uncertain={uncertain} />
-        <div className="space-y-2.5">
-          {marked.map(({ turn, ranges }, index) => (
-            <p key={index} className={TURN_TEXT}>
-              <MarkedText text={turn.text} ranges={ranges} />
-            </p>
-          ))}
-        </div>
+      <div className="space-y-2.5">
+        {marked.map(({ turn, ranges }, index) => (
+          <p key={index} className={TURN_TEXT}>
+            <MarkedText text={turn.text} ranges={ranges} />
+          </p>
+        ))}
       </div>
     )
   }
 
   return (
-    <div>
-      <MetaRow speakers={speakers} uncertain={uncertain} />
-      <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-4 gap-y-2.5">
-        {marked.map(({ turn, ranges }, index) => {
-          const showLabel = index === 0 || turns[index - 1].speaker !== turn.speaker
-          // Capped so a long consultation still lands in under half a second —
-          // the stagger is a settling cue, not a reveal.
-          const delay = `${Math.min(index, 8) * 40}ms`
-          return (
-            <Fragment key={`${turn.speaker}-${index}`}>
-              <div
-                className={cn(
-                  "animate-rise whitespace-nowrap pt-[5px] text-[11px] font-semibold uppercase tracking-[0.06em]",
-                  speakerLabelClass(turn.speaker),
-                )}
-                style={{ animationDelay: delay }}
-              >
-                {showLabel ? `Speaker ${turn.speaker + 1}` : ""}
-              </div>
-              <p className={cn("animate-rise", TURN_TEXT)} style={{ animationDelay: delay }}>
-                <MarkedText text={turn.text} ranges={ranges} />
-              </p>
-            </Fragment>
-          )
-        })}
-      </div>
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-4 gap-y-2.5">
+      {marked.map(({ turn, ranges }, index) => {
+        const showLabel = index === 0 || turns[index - 1].speaker !== turn.speaker
+        // Capped so a long consultation still lands in under half a second —
+        // the stagger is a settling cue, not a reveal.
+        const delay = `${Math.min(index, 8) * 40}ms`
+        return (
+          <Fragment key={`${turn.speaker}-${index}`}>
+            <div
+              className={cn(
+                "animate-rise whitespace-nowrap pt-[5px] text-[11px] font-semibold uppercase tracking-[0.06em]",
+                speakerLabelClass(turn.speaker),
+              )}
+              style={{ animationDelay: delay }}
+            >
+              {showLabel ? `Speaker ${turn.speaker + 1}` : ""}
+            </div>
+            <p className={cn("animate-rise", TURN_TEXT)} style={{ animationDelay: delay }}>
+              <MarkedText text={turn.text} ranges={ranges} />
+            </p>
+          </Fragment>
+        )
+      })}
     </div>
   )
 }
