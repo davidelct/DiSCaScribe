@@ -28,7 +28,7 @@ export default async function LoginPage({
       >
         <div className="flex flex-col items-center text-center">
           <img src="/icon.svg" alt="DiSCaScribe" width={56} height={56} className="mb-5" />
-          <h1 className="font-serif text-2xl font-semibold tracking-tight">DiSCaScribe</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">DiSCaScribe</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Enter the access password to continue.
           </p>

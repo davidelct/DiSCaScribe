@@ -57,7 +57,7 @@ export function StartConsultationDialog({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-foreground/20 p-4 backdrop-blur-sm">
-      <div className="animate-scale-in w-full max-w-lg rounded-3xl border border-border bg-card p-7 shadow-lifted surface">
+      <div className="animate-scale-in w-full max-w-lg rounded-md border border-border bg-card p-6 shadow-lifted surface">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="font-display text-xl font-medium tracking-tight text-foreground">New consultation</h2>
@@ -69,7 +69,7 @@ export function StartConsultationDialog({
             variant="ghost"
             size="sm"
             onClick={onCancel}
-            className="h-8 w-8 rounded-full p-0 text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 rounded-md p-0 text-muted-foreground hover:text-foreground"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -85,7 +85,7 @@ export function StartConsultationDialog({
                 Patient
               </Label>
               <Select value={chosenPatientId} onValueChange={setChosenPatientId}>
-                <SelectTrigger id="consultation-patient" aria-label="Patient">
+                <SelectTrigger id="consultation-patient" aria-label="Patient" className="h-9 rounded-md">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -109,7 +109,7 @@ export function StartConsultationDialog({
               placeholder="e.g. GP consultation"
               value={visitReason}
               onChange={(e) => setVisitReason(e.target.value)}
-              className="h-11 rounded-xl border-border bg-background"
+              className="h-9 rounded-md border-border bg-background"
             />
           </div>
 
@@ -118,14 +118,14 @@ export function StartConsultationDialog({
               variant="ghost"
               onClick={onCancel}
               disabled={starting}
-              className="flex-1 rounded-full text-muted-foreground hover:text-foreground"
+              className="flex-1 rounded-md text-muted-foreground hover:text-foreground"
             >
               Cancel
             </Button>
             <Button
               onClick={() => onRecord(patient, visitReason)}
               disabled={starting}
-              className="flex-[2] rounded-full bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
+              className="flex-[2] rounded-md bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
             >
               <Mic className="mr-2 h-4 w-4" />
               Start recording
@@ -153,7 +153,7 @@ export function StartConsultationDialog({
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={starting}
-            className="w-full rounded-full"
+            className="w-full rounded-md"
           >
             <Upload className="mr-2 h-4 w-4" />
             Upload audio file

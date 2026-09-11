@@ -14,7 +14,6 @@ import { format } from "date-fns"
 import { AlertCircle, ArrowLeft, ChevronRight, ClipboardList, Mic, Pill, ShieldAlert, Trash2, Users } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
-import { cn } from "@ui/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/lib/ui/tooltip"
 import {
   deleteEncounterAudio,
@@ -25,7 +24,7 @@ import {
   patientFullName,
 } from "@storage"
 import type { CodedEntry, Encounter, PatientObservation } from "@storage/types"
-import { consultationStatus } from "@/lib/consultation-display"
+import { ModeBadge, StatusBadge } from "../../consultation-badges"
 import { StartConsultationDialog, useLaunchConsultation } from "../../start-consultation-dialog"
 import { TopBar } from "../../top-bar"
 
@@ -200,7 +199,7 @@ function PatientChartContent({ patientId }: { patientId: string }) {
             <Button
               onClick={() => setShowStartDialog(true)}
               disabled={starting}
-              className="rounded-full bg-primary px-5 text-primary-foreground shadow-soft hover:bg-brand-strong"
+              className="rounded-md bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
             >
               <Mic className="mr-2 h-4 w-4" />
               Start consultation
@@ -263,7 +262,6 @@ function PatientChartContent({ patientId }: { patientId: string }) {
               ) : (
                 <ul className="space-y-1.5">
                   {consultations.map((consultation: Encounter) => {
-                    const status = consultationStatus(consultation)
                     return (
                       <li key={consultation.id} className="group relative">
                         <Link
@@ -275,24 +273,8 @@ function PatientChartContent({ patientId }: { patientId: string }) {
                               <p className="text-sm font-medium text-foreground">
                                 {format(new Date(consultation.created_at), "d MMM yyyy 'at' HH:mm")}
                               </p>
-                              <span
-                                className={cn(
-                                  "rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold",
-                                  status.className,
-                                )}
-                              >
-                                {status.label}
-                              </span>
-                              <span
-                                className={cn(
-                                  "rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold",
-                                  consultation.mode === "recording_only"
-                                    ? "border-success/30 bg-success/5 text-success"
-                                    : "border-primary/25 bg-brand-soft/50 text-primary",
-                                )}
-                              >
-                                {consultation.mode === "recording_only" ? "Recording only" : "Scribed"}
-                              </span>
+                              <StatusBadge encounter={consultation} />
+                              <ModeBadge mode={consultation.mode} />
                             </div>
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">
                               {consultation.visit_reason || "No reason recorded"}

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Settings, Stethoscope } from "lucide-react"
+import { AudioLines, ClipboardList, Settings, Users, type LucideIcon } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
 import { SettingsDialog } from "@ui"
@@ -24,10 +24,15 @@ import type { EncounterMode } from "@storage/types"
  * workspace under Consultations, so the active tab tells the clinician which
  * list "back" returns to.
  */
-function navTabs(pathname: string) {
+function navTabs(pathname: string): Array<{ href: string; label: string; icon: LucideIcon; active: boolean }> {
   return [
-    { href: "/", label: "Patients", active: pathname === "/" || pathname.startsWith("/patients") },
-    { href: "/consultations", label: "Consultations", active: pathname.startsWith("/consultations") },
+    { href: "/", label: "Patients", icon: Users, active: pathname === "/" || pathname.startsWith("/patients") },
+    {
+      href: "/consultations",
+      label: "Consultations",
+      icon: ClipboardList,
+      active: pathname.startsWith("/consultations"),
+    },
   ]
 }
 
@@ -119,32 +124,36 @@ export function TopBar() {
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-6">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-soft">
-                <Stethoscope className="h-4 w-4" />
+              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
+                <AudioLines className="h-4 w-4" />
               </span>
               <span className="font-display text-lg font-medium tracking-tight text-foreground">DiSCaScribe</span>
             </Link>
             <nav className="flex items-center gap-1 text-sm">
-              {navTabs(pathname).map((tab) => (
-                <Link
-                  key={tab.href}
-                  href={tab.href}
-                  aria-current={tab.active ? "page" : undefined}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 transition-colors hover:bg-accent hover:text-foreground",
-                    tab.active ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  {tab.label}
-                </Link>
-              ))}
+              {navTabs(pathname).map((tab) => {
+                const Icon = tab.icon
+                return (
+                  <Link
+                    key={tab.href}
+                    href={tab.href}
+                    aria-current={tab.active ? "page" : undefined}
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition-colors hover:bg-accent hover:text-foreground",
+                      tab.active ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {tab.label}
+                  </Link>
+                )
+              })}
             </nav>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setShowSettings(true)}
-            className="group h-9 gap-2 rounded-full px-3 text-muted-foreground hover:text-foreground"
+            className="group h-8 gap-2 rounded-md px-3 text-muted-foreground hover:text-foreground"
           >
             <Settings className="h-4 w-4 transition-transform duration-500 group-hover:rotate-45" />
             <span className="text-xs">Settings</span>

@@ -17,7 +17,8 @@ import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
 import { cn } from "@ui/lib/utils"
 import { deleteEncounterAudio, isLinkedToPatient } from "@storage"
 import type { Encounter } from "@storage/types"
-import { consultationStatus, formatConsultationLength } from "@/lib/consultation-display"
+import { formatConsultationLength } from "@/lib/consultation-display"
+import { ModeBadge, StatusBadge } from "../consultation-badges"
 import { StartConsultationDialog, useLaunchConsultation } from "../start-consultation-dialog"
 import { TopBar } from "../top-bar"
 
@@ -84,14 +85,14 @@ function ConsultationsContent() {
             <p className="mt-1 text-sm text-muted-foreground">Every consultation recorded on this device.</p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+            <span className="flex h-9 items-center gap-2 rounded-md border border-border bg-card px-3 text-xs text-muted-foreground">
               <ClipboardList className="h-3.5 w-3.5" />
               {encounters.length} recorded
             </span>
             <Button
               onClick={() => setShowStartDialog(true)}
               disabled={starting}
-              className="rounded-full bg-primary px-5 text-primary-foreground shadow-soft hover:bg-brand-strong"
+              className="rounded-md bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
             >
               <Plus className="mr-1.5 h-4 w-4" />
               New
@@ -100,24 +101,24 @@ function ConsultationsContent() {
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-3">
-          <div className="flex h-11 min-w-64 max-w-xl flex-1 items-center rounded-full border border-border bg-card shadow-soft transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-ring/30">
-            <Search className="ml-4 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="flex h-9 min-w-64 max-w-xl flex-1 items-center rounded-md border border-border bg-card shadow-soft transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-ring/30">
+            <Search className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
             <input
               placeholder="Search by patient or reason"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Search consultations"
-              className="h-full w-full rounded-full bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              className="h-full w-full rounded-md bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
-          <div className="flex items-center gap-1 rounded-full bg-muted p-1" role="group" aria-label="Filter by patient link">
+          <div className="flex h-9 items-center gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Filter by patient link">
             {(["all", "linked", "unlinked"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setLinkFilter(value)}
                 className={cn(
-                  "rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                  "h-8 rounded-sm px-3 text-xs font-medium transition-colors",
                   linkFilter === value ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -128,7 +129,7 @@ function ConsultationsContent() {
         </div>
 
         {consultations.length === 0 ? (
-          <div className="animate-fade-up flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border bg-card/50 px-8 py-12 text-center">
+          <div className="animate-fade-up flex flex-col items-center gap-2 rounded-md border border-dashed border-border bg-card/50 px-8 py-12 text-center">
             <ClipboardList className="h-6 w-6 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
               {encounters.length === 0
@@ -137,7 +138,7 @@ function ConsultationsContent() {
             </p>
           </div>
         ) : (
-          <div className="animate-fade-up overflow-x-auto rounded-2xl border border-border bg-card shadow-soft surface">
+          <div className="animate-fade-up overflow-x-auto rounded-md border border-border bg-card shadow-soft surface">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -154,7 +155,6 @@ function ConsultationsContent() {
               </thead>
               <tbody>
                 {consultations.map((consultation: Encounter) => {
-                  const status = consultationStatus(consultation)
                   const linked = isLinkedToPatient(consultation)
                   const href = `/consultations/${consultation.id}`
                   return (
@@ -163,7 +163,7 @@ function ConsultationsContent() {
                       onClick={() => router.push(href)}
                       className="group cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-accent/40"
                     >
-                      <td className="whitespace-nowrap px-5 py-3">
+                      <td className="whitespace-nowrap px-5 py-2.5">
                         <Link
                           href={href}
                           onClick={(e) => e.stopPropagation()}
@@ -175,7 +175,7 @@ function ConsultationsContent() {
                           {format(new Date(consultation.created_at), "HH:mm")}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3">
+                      <td className="whitespace-nowrap px-3 py-2.5">
                         {linked ? (
                           <Link
                             href={`/patients/${consultation.patient_id}`}
@@ -188,30 +188,19 @@ function ConsultationsContent() {
                           <span className="italic text-muted-foreground">No patient</span>
                         )}
                       </td>
-                      <td className="max-w-xs truncate px-3 py-3 text-muted-foreground">
+                      <td className="max-w-xs truncate px-3 py-2.5 text-muted-foreground">
                         {consultation.visit_reason || "No reason recorded"}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-foreground">
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-foreground">
                         {formatConsultationLength(consultation.recording_duration)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        <span
-                          className={cn(
-                            "rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold",
-                            consultation.mode === "recording_only"
-                              ? "border-success/30 bg-success/5 text-success"
-                              : "border-primary/25 bg-brand-soft/50 text-primary",
-                          )}
-                        >
-                          {consultation.mode === "recording_only" ? "Recording only" : "Scribed"}
-                        </span>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        <ModeBadge mode={consultation.mode} />
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        <span className={cn("rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold", status.className)}>
-                          {status.label}
-                        </span>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        <StatusBadge encounter={consultation} />
                       </td>
-                      <td className="px-3 py-3 text-right">
+                      <td className="px-3 py-2.5 text-right">
                         {consultation.approval_status !== "approved" && (
                           <button
                             type="button"
