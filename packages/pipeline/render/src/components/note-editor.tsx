@@ -314,7 +314,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
               linked ? "text-foreground" : "italic text-muted-foreground",
             )}
           >
-            {linked ? encounter.patient_name || "Unknown Patient" : "No patient"}
+            {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
           </h2>
           {(patient || encounter.patient_id) && (
             <Badge

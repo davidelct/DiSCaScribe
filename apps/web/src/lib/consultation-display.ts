@@ -1,7 +1,8 @@
 /**
  * Presentation helpers shared by every list of consultations (the patient
- * chart's history, the consultations tab): one lifecycle label and one length
- * format, so a consultation reads the same wherever it appears.
+ * chart's history, the consultations tab, stimulated recall): one lifecycle
+ * label and one duration format, so a consultation reads the same wherever it
+ * appears.
  */
 
 import type { Encounter } from "@storage/types"
@@ -24,11 +25,11 @@ export function consultationStatus(e: Encounter): { label: string; className: st
 }
 
 /**
- * Recording length as m:ss (h:mm:ss past an hour). Consultations transcribed
- * from an uploaded file carry no length; those, and anything not yet
+ * Recording duration as m:ss (h:mm:ss past an hour). Consultations transcribed
+ * from an uploaded file carry no duration; those, and anything not yet
  * recorded, read as a dash.
  */
-export function formatConsultationLength(seconds?: number): string {
+export function formatConsultationDuration(seconds?: number): string {
   if (!seconds || seconds <= 0) return "—"
   const total = Math.round(seconds)
   const hours = Math.floor(total / 3600)

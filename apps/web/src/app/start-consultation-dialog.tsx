@@ -8,8 +8,9 @@
  * so the arm can't be flipped casually per consultation.
  *
  * Reached from two places. A patient's chart fixes the patient. The
- * consultations tab offers the register as a dropdown that defaults to "No
- * patient", because a consultation can run untied from any record.
+ * consultations tab offers the register as a dropdown that defaults to
+ * "Unregistered patient": someone is always in the room, but their record
+ * need not be on the register for the consultation to be recorded.
  */
 
 import { useRef, useState } from "react"
@@ -24,8 +25,8 @@ import { PATIENTS, formatNhsNumber, getPatient, getPreferences, patientFullName 
 import type { Patient } from "@storage/types"
 import { setConsultationIntent, type ConsultationIntent } from "@/lib/consultation-intent"
 
-/** Radix Select cannot carry an empty value, so "no patient" needs a sentinel. */
-const NO_PATIENT = "__none__"
+/** Radix Select cannot carry an empty value, so "unregistered" needs a sentinel. */
+const UNREGISTERED = "__unregistered__"
 
 const FIELD_LABEL = "text-xs font-medium uppercase tracking-wide text-muted-foreground"
 
@@ -49,11 +50,11 @@ export function StartConsultationDialog({
   onUpload,
 }: StartConsultationDialogProps) {
   const [visitReason, setVisitReason] = useState("")
-  const [chosenPatientId, setChosenPatientId] = useState(NO_PATIENT)
+  const [chosenPatientId, setChosenPatientId] = useState(UNREGISTERED)
   const [preferredDeviceId] = useState(() => getPreferences().preferredInputDeviceId || "")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const patient = fixedPatient ?? (chosenPatientId === NO_PATIENT ? undefined : getPatient(chosenPatientId))
+  const patient = fixedPatient ?? (chosenPatientId === UNREGISTERED ? undefined : getPatient(chosenPatientId))
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-foreground/20 p-4 backdrop-blur-sm">
@@ -62,7 +63,7 @@ export function StartConsultationDialog({
           <div>
             <h2 className="font-display text-xl font-medium tracking-tight text-foreground">New consultation</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {fixedPatient ? patientFullName(fixedPatient) : "Choose a patient, or run it untied from any record."}
+              {fixedPatient ? patientFullName(fixedPatient) : "Choose the patient from the register, or record an unregistered one."}
             </p>
           </div>
           <Button
@@ -89,7 +90,7 @@ export function StartConsultationDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NO_PATIENT}>No patient</SelectItem>
+                  <SelectItem value={UNREGISTERED}>Unregistered patient</SelectItem>
                   {PATIENTS.map((candidate) => (
                     <SelectItem key={candidate.id} value={candidate.id}>
                       {patientFullName(candidate)} · NHS {formatNhsNumber(candidate.nhs_number)}
@@ -169,7 +170,7 @@ export function StartConsultationDialog({
 
 /**
  * The launch the dialog performs: create the encounter (mode comes from
- * Settings; an absent patient leaves it untied), stash the launch intent for
+ * Settings; an unregistered patient leaves it unlinked), stash the launch intent for
  * the workspace to dispatch on mount, and navigate in.
  */
 export function useLaunchConsultation() {

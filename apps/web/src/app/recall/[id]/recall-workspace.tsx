@@ -88,7 +88,7 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
                 linked ? "text-foreground" : "italic text-muted-foreground",
               )}
             >
-              {linked ? encounter.patient_name || "Unknown Patient" : "No patient"}
+              {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
             </h2>
             {patient && (
               <Badge variant="secondary" className="rounded-md border-transparent bg-brand-soft font-mono text-xs text-primary">

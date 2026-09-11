@@ -48,8 +48,8 @@ export function deleteEncounter(encounters: Encounter[], id: string): Encounter[
 }
 
 /**
- * Whether the consultation is tied to a patient record. An empty patient_id
- * is the one representation of "no patient", so every consumer (lists, the
+ * Whether the consultation's patient is on the register. An empty patient_id
+ * is the one representation of "unregistered", so every consumer (lists, the
  * workspace's back link, the note header) agrees on it.
  */
 export function isLinkedToPatient(encounter: Pick<Encounter, "patient_id">): boolean {

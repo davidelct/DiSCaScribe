@@ -11,7 +11,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
-import { MessageSquareQuote, Play, Search } from "lucide-react"
+import { MessageSquareQuote, Play } from "lucide-react"
 import { Badge } from "@ui/lib/ui/badge"
 import { Button } from "@ui/lib/ui/button"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
@@ -19,7 +19,15 @@ import { cn } from "@ui/lib/utils"
 import { getRecallSessionSummary, type RecallSessionSummary } from "@note-rendering"
 import { isLinkedToPatient } from "@storage"
 import type { Encounter } from "@storage/types"
-import { formatConsultationLength } from "@/lib/consultation-display"
+import { formatConsultationDuration } from "@/lib/consultation-display"
+import {
+  ConsultationSearch,
+  RegistrationFilterGroup,
+  matchesConsultation,
+  matchesRegistration,
+  type ConsultationSearchField,
+  type RegistrationFilter,
+} from "../consultation-search"
 import { TopBar } from "../top-bar"
 
 interface RecallStage {
@@ -50,19 +58,13 @@ function recallStage(summary: RecallSessionSummary | undefined, hasTranscript: b
   return { label: "Not started", className: "border-border bg-muted text-muted-foreground", action: "Start" }
 }
 
-function matchesQuery(encounter: Encounter, query: string): boolean {
-  if (!query) return true
-  return (
-    encounter.patient_name.toLowerCase().includes(query) ||
-    (encounter.visit_reason || "").toLowerCase().includes(query)
-  )
-}
-
 function RecallContent() {
   const router = useRouter()
   const { encounters } = useEncounters()
   const httpsWarning = useHttpsWarning()
   const [query, setQuery] = useState("")
+  const [searchField, setSearchField] = useState<ConsultationSearchField>("patient")
+  const [registration, setRegistration] = useState<RegistrationFilter>("all")
   const [summaries, setSummaries] = useState<Record<string, RecallSessionSummary>>({})
 
   // Each session lives in its own encrypted entry, so the stages load a beat
@@ -83,9 +85,8 @@ function RecallContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encounters])
 
-  const normalizedQuery = query.trim().toLowerCase()
   const consultations = encounters
-    .filter((e: Encounter) => matchesQuery(e, normalizedQuery))
+    .filter((e: Encounter) => matchesRegistration(e, registration) && matchesConsultation(e, searchField, query))
     .sort((a: Encounter, b: Encounter) => b.created_at.localeCompare(a.created_at))
 
   return (
@@ -110,15 +111,9 @@ function RecallContent() {
           </span>
         </div>
 
-        <div className="mb-5 flex h-9 min-w-64 max-w-xl items-center rounded-md border border-border bg-card shadow-soft transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-ring/30">
-          <Search className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
-          <input
-            placeholder="Search by patient or reason"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search consultations"
-            className="h-full w-full rounded-md bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <ConsultationSearch field={searchField} onFieldChange={setSearchField} query={query} onQueryChange={setQuery} />
+          <RegistrationFilterGroup value={registration} onChange={setRegistration} />
         </div>
 
         {consultations.length === 0 ? (
@@ -127,7 +122,7 @@ function RecallContent() {
             <p className="text-sm text-muted-foreground">
               {encounters.length === 0
                 ? "No consultations yet. Record one first, then come back to recall it."
-                : "No consultations match the current search."}
+                : "No consultations match the current search and filter."}
             </p>
           </div>
         ) : (
@@ -138,7 +133,7 @@ function RecallContent() {
                   <th className="px-5 py-3 font-medium">When</th>
                   <th className="px-3 py-3 font-medium">Patient</th>
                   <th className="px-3 py-3 font-medium">Reason</th>
-                  <th className="px-3 py-3 font-medium">Length</th>
+                  <th className="px-3 py-3 font-medium">Duration</th>
                   <th className="px-3 py-3 font-medium">Recall</th>
                   <th className="px-3 py-3">
                     <span className="sr-only">Open recall</span>
@@ -180,14 +175,14 @@ function RecallContent() {
                             {consultation.patient_name || "Unknown patient"}
                           </Link>
                         ) : (
-                          <span className="italic text-muted-foreground">No patient</span>
+                          <span className="italic text-muted-foreground">Unregistered</span>
                         )}
                       </td>
                       <td className="max-w-xs truncate px-3 py-2.5 text-muted-foreground">
                         {consultation.visit_reason || "No reason recorded"}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-foreground">
-                        {formatConsultationLength(consultation.recording_duration)}
+                        {formatConsultationDuration(consultation.recording_duration)}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5">
                         <Badge variant="outline" className={stage.className}>

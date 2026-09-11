@@ -3,10 +3,10 @@ import test from "node:test"
 import { createEncounter, isLinkedToPatient } from "../encounters.js"
 
 /**
- * A consultation may be started untied from any patient (the consultations
- * tab's "No patient"). The one representation of that is an empty patient_id;
- * these tests pin that convention down so lists, the workspace's back link
- * and the note header keep agreeing on it.
+ * A consultation may be recorded for a patient who is not on the register
+ * (the start dialog's "Unregistered patient"). The one representation of
+ * that is an empty patient_id; these tests pin that convention down so
+ * lists, the workspace's back link and the note header keep agreeing on it.
  */
 
 test("createEncounter without a patient is unlinked", () => {
