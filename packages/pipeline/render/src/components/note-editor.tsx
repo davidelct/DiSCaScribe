@@ -6,8 +6,8 @@ import { isLinkedToPatient, noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
 import { Badge } from "@ui/lib/ui/badge"
-import { Skeleton } from "@ui/lib/ui/skeleton"
 import {
+  ArrowDown,
   Save,
   Check,
   ChevronRight,
@@ -26,6 +26,7 @@ import { cn } from "@ui/lib/utils"
 import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
 import { TranscriptSkeleton } from "./transcript-skeleton"
+import { NoteSkeleton } from "./note-skeleton"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
 import { parseNoteSections, type NoteSection } from "../note-sections"
@@ -35,8 +36,10 @@ import { parseNoteSections, type NoteSection } from "../note-sections"
  * audio, then the transcript, then the clinical note, stacked. A stage strip
  * under the identity row says which of the three is done, live or drafting.
  * Nothing sits behind a tab: while the note drafts the transcript is there to
- * read above it, and once the note lands the transcript folds away so the
- * page settles on the note.
+ * read above it. When the note lands, nothing moves under the clinician: the
+ * stage strip and the note card announce it, and if the note card is off
+ * screen a pill offers to scroll to it. The transcript folds by default only
+ * when a consultation is opened later with its note already present.
  */
 
 export type CaptureStepStatus = "pending" | "in-progress" | "done" | "failed"
@@ -128,37 +131,6 @@ function SectionedNote({ source }: { source: string }) {
   )
 }
 
-/**
- * The note's shape while it drafts: the four SOAP headings with placeholder
- * lines beneath, so the structure lands before the words do.
- */
-const NOTE_SKELETON: Array<{ title: string; lines: number[] }> = [
-  { title: "Subjective", lines: [96, 88, 42] },
-  { title: "Objective", lines: [58] },
-  { title: "Assessment", lines: [64] },
-  { title: "Plan", lines: [72, 66, 80] },
-]
-
-function NoteSkeleton() {
-  return (
-    <div className="[&>*+*]:mt-8" role="status" aria-label="Drafting the clinical note">
-      {NOTE_SKELETON.map((section) => (
-        <section key={section.title}>
-          <h2 className="mb-3 border-b border-border pb-2 font-display text-xl font-medium tracking-tight text-muted-foreground">
-            {section.title}
-          </h2>
-          <div className="space-y-2.5">
-            {section.lines.map((width, index) => (
-              <Skeleton key={index} className="h-3" style={{ width: `${width}%` }} />
-            ))}
-          </div>
-        </section>
-      ))}
-      <span className="sr-only">Drafting the clinical note…</span>
-    </div>
-  )
-}
-
 /** A failed pipeline step, shown above the stages with its retry action. */
 function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
@@ -243,9 +215,13 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   // Read-only view of an older version from the trail; null = current note.
   const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null)
   const [showHistory, setShowHistory] = useState(false)
-  // The transcript is open while it is the only thing to read, and folds away
-  // once a note exists so the page settles on the note.
+  // The transcript starts open when it is the only thing to read, and starts
+  // folded when the note already exists on open. It never folds by itself.
   const [transcriptOpen, setTranscriptOpen] = useState(!hasNote)
+  // Set when the note arrives during this session; cleared once the note
+  // card has been seen. Drives the "note ready" pill.
+  const [noteJustArrived, setNoteJustArrived] = useState(false)
+  const noteCardRef = useRef<HTMLElement>(null)
   const prevNoteRef = useRef<string>(encounter.note_text || "")
 
   // Reset the view when switching encounters.
@@ -256,12 +232,14 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
     setViewingVersion(null)
     setShowHistory(false)
     setTranscriptOpen(!encounter.note_text?.trim())
+    setNoteJustArrived(false)
     prevNoteRef.current = encounter.note_text || ""
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encounter.id])
 
-  // Keep the editable markdown in sync with the stored note, and fold the
-  // transcript the moment generation delivers the note.
+  // Keep the editable markdown in sync with the stored note. When the note
+  // first arrives, announce it rather than rearranging the page: the clinician
+  // may be mid-way through the transcript.
   useEffect(() => {
     setNoteMarkdown(encounter.note_text || "")
     const hadNote = Boolean(prevNoteRef.current?.trim())
@@ -269,10 +247,34 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
     if (!hadNote && hasNoteNow) {
       setNoteMode("preview")
       setHasChanges(false)
-      setTranscriptOpen(false)
+      setNoteJustArrived(true)
     }
     prevNoteRef.current = encounter.note_text || ""
   }, [encounter.note_text])
+
+  // The pill lives only while the freshly arrived note card is out of view;
+  // the moment it scrolls into view (or already is), the pill goes.
+  useEffect(() => {
+    if (!noteJustArrived) return
+    const card = noteCardRef.current
+    if (!card || typeof IntersectionObserver === "undefined") {
+      setNoteJustArrived(false)
+      return
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNoteJustArrived(false)
+      },
+      { threshold: 0.25 },
+    )
+    observer.observe(card)
+    return () => observer.disconnect()
+  }, [noteJustArrived])
+
+  const scrollToNote = () => {
+    noteCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    setNoteJustArrived(false)
+  }
 
   // A note can be written by hand (recording-only arm, or a failed generation)
   // once capture has finished and delivered a transcript.
@@ -527,19 +529,30 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                 <span className="ml-auto text-xs font-medium text-primary">{showTranscriptBody ? "Hide" : "Show"}</span>
               )}
             </button>
-            {showTranscriptBody && (
-              <div className={CARD_BODY}>
-                {hasTranscript ? (
-                  <TranscriptView text={encounter.transcript_text} confidence={encounter.transcript_confidence} />
-                ) : (
-                  <TranscriptSkeleton />
+            {/* The body stays mounted and its row animates between 0fr and
+                1fr, so folding and unfolding slide rather than snap. */}
+            {transcriptCanOpen && (
+              <div
+                className={cn(
+                  "grid transition-[grid-template-rows] duration-300 ease-out",
+                  showTranscriptBody ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
                 )}
+              >
+                <div className="min-h-0 overflow-hidden" aria-hidden={!showTranscriptBody} inert={!showTranscriptBody}>
+                  <div className={CARD_BODY}>
+                    {hasTranscript ? (
+                      <TranscriptView text={encounter.transcript_text} confidence={encounter.transcript_confidence} />
+                    ) : (
+                      <TranscriptSkeleton />
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </section>
 
           {/* Clinical note: the deliverable, with its own actions. */}
-          <section className={CARD}>
+          <section ref={noteCardRef} className={CARD}>
             <div className={CARD_HEAD}>
               <h2 className={cn("text-sm font-semibold", noteBody ? "text-foreground" : "text-muted-foreground")}>
                 Clinical note
@@ -683,6 +696,18 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
           </section>
         </div>
       </div>
+
+      {noteJustArrived && (
+        <button
+          type="button"
+          onClick={scrollToNote}
+          className="animate-rise fixed bottom-6 left-1/2 z-30 inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground shadow-lifted transition-colors hover:bg-brand-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <SquareCheck className="h-4 w-4" />
+          Clinical note ready
+          <ArrowDown className="h-3.5 w-3.5 opacity-80" />
+        </button>
+      )}
     </div>
   )
 }
