@@ -2,9 +2,9 @@
 
 /**
  * The stimulated recall tab: every consultation on this device, with where
- * its recall interview stands and a way in. The interview walks the
- * transcript utterance by utterance, so a consultation without a transcript
- * is listed but cannot be started.
+ * its recall interview stands and a way in. The interview goes back over
+ * the transcript, so a consultation without a transcript is listed but
+ * cannot be started.
  */
 
 import { useEffect, useState } from "react"
@@ -48,9 +48,9 @@ function recallStage(summary: RecallSessionSummary | undefined, hasTranscript: b
   if (summary.recorded) {
     return { label: "Recorded", className: "border-primary/25 bg-brand-soft/50 text-primary", action: "Open" }
   }
-  if (summary.hypotheses > 0 || summary.rated > 0) {
+  if (summary.hypotheses > 0 || summary.entries > 0) {
     return {
-      label: `In progress · ${summary.rated} rated`,
+      label: `In progress · ${summary.entries} ${summary.entries === 1 ? "entry" : "entries"}`,
       className: "border-warning/40 bg-warning/10 text-warning-foreground",
       action: "Continue",
     }
@@ -102,7 +102,7 @@ function RecallContent() {
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">Stimulated recall</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Step back through a consultation and rate how each cue shaped your thinking.
+              Go back over a consultation and record what you were thinking at each step.
             </p>
           </div>
           <span className="flex h-9 items-center gap-2 rounded-md border border-border bg-card px-3 text-xs text-muted-foreground">

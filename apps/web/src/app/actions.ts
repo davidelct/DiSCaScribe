@@ -2,7 +2,8 @@
 
 import { cookies } from "next/headers"
 import type { ClinicalNoteRequest } from "@note-core"
-import { createClinicalNoteText } from "@note-core"
+import { analyseTranscriptForRecall, createClinicalNoteText } from "@note-core"
+import type { RecallAnalysis } from "@storage/types"
 import { getAnthropicApiKey } from "@storage/server-api-keys"
 import { writeAuditEntry } from "@storage/audit-log"
 import { AUTH_COOKIE, sessionRole } from "@/lib/auth"
@@ -57,6 +58,59 @@ export async function generateClinicalNote(
     // Audit log: note generation failed
     await writeAuditEntry({
       event_type: "note.generation_failed",
+      success: false,
+      error_message: error instanceof Error ? error.message : String(error),
+    })
+
+    throw error
+  }
+}
+
+/**
+ * Mark the question–answer exchanges in a consultation transcript for the
+ * stimulated-recall interview. Same session and key rules as note
+ * generation; runs beside it once the transcript is final, and from the
+ * recall view when an encounter has no analysis yet.
+ */
+export async function detectRecallExchanges(
+  params: { transcript: string },
+  options: GenerateNoteOptions = {},
+): Promise<RecallAnalysis> {
+  const role = await sessionRole((await cookies()).get(AUTH_COOKIE)?.value)
+  if (!role) {
+    throw new Error("Session expired. Log in again.")
+  }
+  const suppliedKey = options.anthropicApiKey?.trim()
+  if (role === "byok" && !suppliedKey) {
+    throw new Error(BYOK_KEY_REQUIRED_MESSAGE)
+  }
+  const apiKey = suppliedKey || getAnthropicApiKey()
+
+  try {
+    await writeAuditEntry({
+      event_type: "recall.detection_started",
+      success: true,
+      metadata: {
+        transcript_length: params.transcript?.length || 0,
+      },
+    })
+
+    const analysis = await analyseTranscriptForRecall({ transcript: params.transcript, apiKey })
+
+    await writeAuditEntry({
+      event_type: "recall.exchanges_detected",
+      success: true,
+      metadata: {
+        exchanges: analysis.exchanges.length,
+        turns: analysis.turn_count,
+        clinician_identified: analysis.clinician_speaker !== undefined,
+      },
+    })
+
+    return analysis
+  } catch (error) {
+    await writeAuditEntry({
+      event_type: "recall.detection_failed",
       success: false,
       error_message: error instanceof Error ? error.message : String(error),
     })

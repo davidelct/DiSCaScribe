@@ -1,171 +1,179 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Encounter } from "@storage/types"
-import { loadSecureItem, saveSecureItem } from "@storage/secure-storage"
 import { getEncounterAudio, saveEncounterAudio } from "@storage/audio-store"
 import { useAudioRecorder, compressAudioFileToMp3 } from "@audio"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
-import { Check, Download, Loader2, Mic, Plus, RotateCcw, X } from "lucide-react"
-import { parseDiarizedTranscript, type TranscriptTurn } from "./transcript-view"
+import { guessClinicianSpeaker, heuristicRecallExchanges } from "@pipeline-errors"
+import { Check, Download, Loader2, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
 import { AudioPlayer } from "./audio-player"
-import { RecordingBar } from "./recording-bar"
+import { RecallTranscript } from "./recall-transcript"
+import { FinalDiagnosisCard, RecallEntryCard, type EntryRow } from "./recall-entry"
+import {
+  buildRecallPayload,
+  carriedLikelihood,
+  emptyRecallSession,
+  hypothesesAt,
+  loadRecallSession,
+  orderedEntries,
+  recallAudioKey,
+  saveRecallSession,
+  toUtterances,
+  type RecallEntry,
+  type RecallRating,
+  type RecallSession,
+} from "./recall-session"
 
 /**
- * Stimulated Recall (WT3.1) — in-app v1, ported from the design mock.
+ * Stimulated Recall (WT3.1).
  *
- * The clinician steps back through the consultation transcript and, per
- * utterance, rates how much that cue supported or spoke against each
- * diagnostic hypothesis they were holding at the time (the PID measure).
- * Hypotheses and ratings are persisted per encounter in the same encrypted
- * store as the encounters themselves.
+ * Two columns. Left, the consultation transcript as it reads in the
+ * consultation view, every turn clickable and the question–answer exchanges
+ * bracketed (detected by a small model beside note generation, or by a
+ * question-mark heuristic until then). Right, one table per stop in
+ * transcript order: what the clinician remembers thinking, and each
+ * hypothesis they held with its likelihood and how much the answer supported
+ * it. A new table starts from the previous one. The recall interview can be
+ * recorded alongside, with every turn click timed against the recording.
  */
-
-interface Hypothesis {
-  id: string
-  name: string
-  /** Current subjective likelihood, 0–100. */
-  pct: number
-  /** Likelihood after each saved rating, for the mini history bars. */
-  history: number[]
-}
-
-interface CueRating {
-  /** Index into the utterance list. */
-  utterance: number
-  /** −3 (strongly against) … +3 (strongly supports). */
-  value: number
-  hypothesisId: string
-  /** Likelihood of the rated hypothesis after this cue, 0–100. */
-  updatedPct: number
-}
-
-/** One utterance click made while the recall interview was being recorded. */
-interface UtteranceClick {
-  /** Index into the utterance list. */
-  utterance: number
-  /** Position in the recall recording at click time, seconds (pauses excluded). */
-  audioOffsetSeconds: number
-  /** Wall-clock time of the click. */
-  at: string
-}
-
-/**
- * Timing of the recall recording, for segmenting the audio per utterance:
- * the stretch between two consecutive clicks is the clinician talking about
- * the first click's utterance.
- */
-interface RecallTimeline {
-  /** Wall-clock time the recording started. */
-  startedAt: string
-  /** Wall-clock time the recording stopped. */
-  stoppedAt?: string
-  /** Recorded length in seconds (pauses excluded). */
-  durationSeconds?: number
-  /** Every utterance click while recording, in order. */
-  utteranceClicks: UtteranceClick[]
-}
-
-interface RecallSession {
-  hypotheses: Hypothesis[]
-  /** Keyed by utterance index. */
-  ratings: Record<number, CueRating>
-  /** Timing of the recall recording (replaced on re-record). */
-  timeline?: RecallTimeline
-  /** Set once the recall recording + session data have been archived. */
-  recallArchivedAt?: string
-}
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
 
-const SCALE_VALUES = [-3, -2, -1, 0, 1, 2, 3] as const
+const CARD = "rounded-2xl border border-border bg-card shadow-soft"
 
-/** Diverging support scale: amber (against) → neutral → teal (supports). */
-const SCALE_CLASS: Record<number, string> = {
-  [-3]: "bg-amber-800",
-  [-2]: "bg-amber-600",
-  [-1]: "bg-amber-400",
-  [0]: "bg-slate-400",
-  [1]: "bg-teal-400",
-  [2]: "bg-teal-600",
-  [3]: "bg-teal-700",
+const PROMPT =
+  "Go back over the consultation as it happened and report only the thoughts you remember having at the time: " +
+  "tentative diagnoses, why you asked a question, what you made of the answer. Leave out what you know now and " +
+  "anything you are unsure of. For each hypothesis, rate how likely it seemed then and how much the answer " +
+  "supported it. You need not be exhaustive."
+
+function formatDuration(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(whole / 60)
+  return `${String(minutes).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`
 }
 
-function storageKey(encounterId: string): string {
-  return `openscribe_recall_${encounterId}`
+/** One of the two rating scales, drawn as the paper form draws it. */
+function Scale({ title, labels, minorEvery, ends }: { title: string; labels: string[]; minorEvery: number; ends: string[] }) {
+  const count = labels.length
+  const step = 100 / (count - 1)
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-foreground">{title}</span>
+      <div className="relative h-6">
+        <span aria-hidden className="absolute inset-x-0 top-[5px] h-px bg-foreground/40" />
+        {labels.map((label, index) => {
+          const x = index * step
+          return (
+            <Fragment key={index}>
+              <span aria-hidden className="absolute top-px h-[9px] w-px bg-foreground/40" style={{ left: `${x}%` }} />
+              <span className="absolute top-3 -translate-x-1/2 font-mono text-[10.5px] text-muted-foreground" style={{ left: `${x}%` }}>
+                {label}
+              </span>
+              {index < count - 1 &&
+                Array.from({ length: minorEvery - 1 }, (_, k) => (
+                  <span
+                    key={k}
+                    aria-hidden
+                    className="absolute top-[3px] h-[5px] w-px bg-foreground/25"
+                    style={{ left: `${x + (step * (k + 1)) / minorEvery}%` }}
+                  />
+                ))}
+            </Fragment>
+          )
+        })}
+      </div>
+      <div className="flex justify-between text-[11px] text-muted-foreground">
+        {ends.map((end) => (
+          <span key={end}>{end}</span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
-/** Audio-store key for the recall-interview recording of an encounter. */
-export function recallAudioKey(encounterId: string): string {
-  return `recall:${encounterId}`
+export interface StimulatedRecallViewProps {
+  encounter: Encounter
+  /**
+   * Detects the transcript's question–answer exchanges and saves them to the
+   * encounter, when it has none (or a stale set). Called once per open; the
+   * view brackets the exchanges as soon as the encounter updates. Without it,
+   * or if it fails, a question-mark heuristic stands in.
+   */
+  detectExchanges?: (transcript: string) => Promise<void>
 }
 
-export interface RecallSessionSummary {
-  hypotheses: number
-  rated: number
-  /** The recall interview has been recorded (audio on this device, or a finished timeline). */
-  recorded: boolean
-  archivedAt?: string
-}
+export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedRecallViewProps) {
+  const turns = useMemo(() => toUtterances(encounter.transcript_text), [encounter.transcript_text])
+  const analysis = encounter.recall_analysis
+  const analysisFresh = Boolean(analysis && turns.length > 0 && analysis.turn_count === turns.length)
+  const clinicianSpeaker = useMemo(
+    () => (analysisFresh ? analysis?.clinician_speaker : guessClinicianSpeaker(turns)),
+    [analysis, analysisFresh, turns],
+  )
+  const exchanges = useMemo(
+    () => (analysisFresh && analysis ? analysis.exchanges : heuristicRecallExchanges(turns, clinicianSpeaker)),
+    [analysis, analysisFresh, clinicianSpeaker, turns],
+  )
+  const speakerCount = useMemo(() => new Set(turns.map((turn) => turn.speaker)).size, [turns])
+  const speakerLabel = useCallback(
+    (speaker: number) =>
+      clinicianSpeaker !== undefined && speakerCount === 2
+        ? speaker === clinicianSpeaker
+          ? "GP"
+          : "Patient"
+        : `Speaker ${speaker + 1}`,
+    [clinicianSpeaker, speakerCount],
+  )
+  const accentSpeaker = clinicianSpeaker ?? turns[0]?.speaker ?? 0
 
-/**
- * Where a consultation's recall interview stands, for the recall list:
- * whether it has been started, how far the ratings got, and whether it has
- * been recorded and archived. Reads the same stores the view persists to.
- */
-export async function getRecallSessionSummary(encounterId: string): Promise<RecallSessionSummary> {
-  const [saved, audio] = await Promise.all([
-    loadSecureItem<RecallSession>(storageKey(encounterId)),
-    getEncounterAudio(recallAudioKey(encounterId)),
-  ])
-  return {
-    hypotheses: saved?.hypotheses?.length ?? 0,
-    rated: saved ? Object.keys(saved.ratings ?? {}).length : 0,
-    recorded: Boolean(audio) || Boolean(saved?.timeline?.stoppedAt),
-    archivedAt: saved?.recallArchivedAt,
-  }
-}
-
-/**
- * Utterances to step through. Diarised transcripts give real speaker turns;
- * plain transcripts fall back to sentence-ish chunks so the flow still works.
- */
-function toUtterances(transcript: string): TranscriptTurn[] {
-  const turns = parseDiarizedTranscript(transcript?.trim() ?? "")
-  if (turns && turns.length > 0) return turns
-  const plain = (transcript ?? "").trim()
-  if (!plain) return []
-  return plain
-    .split(/(?<=[.?!])\s+/)
-    .map((text) => text.trim())
-    .filter(Boolean)
-    .map((text) => ({ speaker: 0, text }))
-}
-
-export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
-  const utterances = useMemo(() => toUtterances(encounter.transcript_text), [encounter.transcript_text])
-  const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
-  const [ratings, setRatings] = useState<Record<number, CueRating>>({})
-  const [active, setActive] = useState<number | null>(null)
-  const [selectedHyp, setSelectedHyp] = useState<string | null>(null)
-  const [pendingValue, setPendingValue] = useState<number | null>(null)
-  const [pendingPct, setPendingPct] = useState<number | null>(null)
-  const [newHypName, setNewHypName] = useState("")
+  // ── Session: loaded per encounter, saved a beat after each change ──────────
+  const [session, setSession] = useState<RecallSession>(emptyRecallSession)
   const [loaded, setLoaded] = useState(false)
+  const sessionRef = useRef(session)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const update = useCallback(
+    (updater: (current: RecallSession) => RecallSession) => {
+      const next = updater(sessionRef.current)
+      sessionRef.current = next
+      setSession(next)
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null
+        void saveRecallSession(encounter.id, next)
+      }, 300)
+    },
+    [encounter.id],
+  )
+  // A pending save is flushed when the view leaves or switches encounter.
+  useEffect(() => {
+    const id = encounter.id
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+        void saveRecallSession(id, sessionRef.current)
+      }
+    }
+  }, [encounter.id])
+
+  const [selected, setSelected] = useState<number[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [promptOpen, setPromptOpen] = useState(true)
+  const [detecting, setDetecting] = useState(false)
   const [recallStatus, setRecallStatus] = useState<RecallRecordingStatus>("idle")
   const [hasRecallAudio, setHasRecallAudio] = useState(false)
   const [recallAudioVersion, setRecallAudioVersion] = useState(0)
-  const utteranceRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const turnRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const entryRefs = useRef(new Map<string, HTMLElement>())
   const recallBlobRef = useRef<Blob | null>(null)
 
-  // Recall-recording timeline. The offset clock counts recorded time only:
-  // accumulated ms up to the last pause, plus the running stretch since the
-  // last start/resume when not paused.
-  const timelineRef = useRef<RecallTimeline | null>(null)
+  // Recall-recording clock: recorded time only — accumulated ms up to the
+  // last pause, plus the running stretch since the last start/resume.
   const recordedMsRef = useRef(0)
   const runningSinceRef = useRef<number | null>(null)
-
   const recordedOffsetSeconds = () => {
     const running = runningSinceRef.current === null ? 0 : performance.now() - runningSinceRef.current
     return Math.round(recordedMsRef.current + running) / 1000
@@ -174,30 +182,24 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
   const recorder = useAudioRecorder({ emitSegments: false })
   const recallKey = recallAudioKey(encounter.id)
 
-  // Load the saved session for this encounter; reset transient state on switch.
   useEffect(() => {
     let cancelled = false
     setLoaded(false)
-    setActive(null)
-    setPendingValue(null)
-    setPendingPct(null)
+    setSelected([])
+    setActiveId(null)
     setRecallStatus("idle")
     setHasRecallAudio(false)
     recallBlobRef.current = null
-    timelineRef.current = null
     recordedMsRef.current = 0
     runningSinceRef.current = null
     void getEncounterAudio(recallAudioKey(encounter.id)).then((blob) => {
       if (!cancelled) setHasRecallAudio(Boolean(blob))
     })
-    void loadSecureItem<RecallSession>(storageKey(encounter.id)).then((saved) => {
+    void loadRecallSession(encounter.id).then((saved) => {
       if (cancelled) return
-      setHypotheses(saved?.hypotheses ?? [])
-      setRatings(saved?.ratings ?? {})
-      setSelectedHyp(saved?.hypotheses?.[0]?.id ?? null)
-      archivedAtRef.current = saved?.recallArchivedAt
-      timelineRef.current = saved?.timeline ?? null
-      if (saved?.recallArchivedAt) setRecallStatus("archived")
+      sessionRef.current = saved
+      setSession(saved)
+      if (saved.recallArchivedAt) setRecallStatus("archived")
       setLoaded(true)
     })
     return () => {
@@ -205,128 +207,190 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
     }
   }, [encounter.id])
 
-  const archivedAtRef = useRef<string | undefined>(undefined)
+  // Exchanges missing or stale: detect them once per open, quietly.
+  const detectRef = useRef(detectExchanges)
+  useEffect(() => {
+    detectRef.current = detectExchanges
+  }, [detectExchanges])
+  const attemptedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const detect = detectRef.current
+    if (analysisFresh || turns.length < 2 || !detect || attemptedRef.current === encounter.id) return
+    attemptedRef.current = encounter.id
+    setDetecting(true)
+    detect(encounter.transcript_text)
+      .catch(() => undefined)
+      .finally(() => setDetecting(false))
+  }, [analysisFresh, encounter.id, encounter.transcript_text, turns.length])
 
-  const persist = useCallback(
-    (nextHypotheses: Hypothesis[], nextRatings: Record<number, CueRating>) => {
-      void saveSecureItem<RecallSession>(storageKey(encounter.id), {
-        hypotheses: nextHypotheses,
-        ratings: nextRatings,
-        timeline: timelineRef.current ?? undefined,
-        recallArchivedAt: archivedAtRef.current,
-      })
-    },
-    [encounter.id],
+  // ── Derived views ──────────────────────────────────────────────────────────
+  const ordered = useMemo(() => orderedEntries(session), [session])
+  const questionTurns = useMemo(() => new Set(exchanges.map((exchange) => exchange.question)), [exchanges])
+  const entryViews = useMemo(
+    () =>
+      ordered.map((entry, position) => {
+        const rows: EntryRow[] = hypothesesAt(session, ordered, position).map((hypothesis) => {
+          const rating = entry.ratings[hypothesis.id]
+          return {
+            hypothesis,
+            isNew: hypothesis.entryId === entry.id,
+            likelihood: rating?.likelihood ?? null,
+            carried: carriedLikelihood(ordered, position, hypothesis.id),
+            support: rating?.support ?? null,
+          }
+        })
+        const first = entry.turns[0]
+        return {
+          entry,
+          number: position + 1,
+          rows,
+          isQuestion: questionTurns.has(first) || /\?\s*$/.test(turns[first]?.text ?? ""),
+          excerpt: entry.turns.map((index) => ({
+            label: speakerLabel(turns[index]?.speaker ?? 0),
+            text: turns[index]?.text ?? "",
+          })),
+        }
+      }),
+    [ordered, questionTurns, session, speakerLabel, turns],
+  )
+  const entryByTurn = useMemo(() => {
+    const map = new Map<number, RecallEntry>()
+    for (const entry of session.entries) for (const index of entry.turns) map.set(index, entry)
+    return map
+  }, [session.entries])
+  const transcriptEntries = useMemo(
+    () => entryViews.map((view) => ({ id: view.entry.id, number: view.number, turns: view.entry.turns })),
+    [entryViews],
   )
 
-  const leadingId = useMemo(() => {
-    if (hypotheses.length === 0) return null
-    return hypotheses.reduce((best, h) => (h.pct > best.pct ? h : best), hypotheses[0]).id
-  }, [hypotheses])
+  // ── Selection and entries ──────────────────────────────────────────────────
+  const activateEntry = (id: string, scrollTranscript: boolean) => {
+    setActiveId(id)
+    requestAnimationFrame(() => entryRefs.current.get(id)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
+    if (scrollTranscript) {
+      const first = sessionRef.current.entries.find((entry) => entry.id === id)?.turns[0]
+      if (first !== undefined) turnRefs.current[first]?.scrollIntoView({ block: "center", behavior: "smooth" })
+    }
+  }
 
-  const selectUtterance = (index: number) => {
+  const onTurnClick = (index: number) => {
     // While the recall interview is being recorded, log the click against the
-    // recording's timeline so the audio can later be segmented per utterance.
-    if (recallStatus === "recording" && timelineRef.current) {
-      timelineRef.current.utteranceClicks.push({
-        utterance: index,
-        audioOffsetSeconds: recordedOffsetSeconds(),
-        at: new Date().toISOString(),
-      })
+    // recording's timeline so the audio can later be segmented per turn.
+    if (recallStatus === "recording") {
+      const click = { utterance: index, audioOffsetSeconds: recordedOffsetSeconds(), at: new Date().toISOString() }
+      update((current) =>
+        current.timeline
+          ? { ...current, timeline: { ...current.timeline, utteranceClicks: [...current.timeline.utteranceClicks, click] } }
+          : current,
+      )
     }
-    setActive(index)
-    setPendingValue(ratings[index]?.value ?? null)
-    setPendingPct(null)
-    if (ratings[index]) setSelectedHyp(ratings[index].hypothesisId)
+    const owner = entryByTurn.get(index)
+    if (owner) {
+      activateEntry(owner.id, false)
+      return
+    }
+    setSelected((current) => {
+      if (current.includes(index)) return current.filter((i) => i !== index)
+      // A turn in a question–answer exchange brings the whole exchange along,
+      // unless part of it is already picked: then only this turn is added.
+      const exchange = exchanges.find((candidate) => index >= candidate.question && index <= candidate.answer_end)
+      const group = exchange
+        ? Array.from({ length: exchange.answer_end - exchange.question + 1 }, (_, k) => exchange.question + k).filter(
+            (i) => !entryByTurn.has(i),
+          )
+        : [index]
+      const additions = group.some((i) => current.includes(i)) ? [index] : group
+      return [...new Set([...current, ...additions])].sort((a, b) => a - b)
+    })
   }
 
-  const addHypothesis = () => {
-    const name = newHypName.trim()
-    if (!name) return
-    const hyp: Hypothesis = { id: crypto.randomUUID(), name, pct: 50, history: [50] }
-    const next = [...hypotheses, hyp]
-    setHypotheses(next)
-    setSelectedHyp(hyp.id)
-    setNewHypName("")
-    persist(next, ratings)
+  const addEntry = () => {
+    if (selected.length === 0) return
+    const entry: RecallEntry = {
+      id: crypto.randomUUID(),
+      turns: [...selected].sort((a, b) => a - b),
+      why: "",
+      thinking: "",
+      notes: "",
+      ratings: {},
+      createdAt: new Date().toISOString(),
+    }
+    update((current) => ({ ...current, entries: [...current.entries, entry] }))
+    setSelected([])
+    activateEntry(entry.id, false)
   }
 
-  // Remove a hypothesis along with the cue ratings that referenced it, so no
-  // rating points at a differential that no longer exists.
-  const removeHypothesis = (id: string) => {
-    const nextHypotheses = hypotheses.filter((h) => h.id !== id)
-    const nextRatings = Object.fromEntries(
-      Object.entries(ratings).filter(([, r]) => r.hypothesisId !== id),
-    ) as Record<number, CueRating>
-    setHypotheses(nextHypotheses)
-    setRatings(nextRatings)
-    if (selectedHyp === id) setSelectedHyp(nextHypotheses[0]?.id ?? null)
-    persist(nextHypotheses, nextRatings)
+  const removeEntry = (id: string) => {
+    if (!window.confirm("Remove this entry and its ratings?")) return
+    update((current) => {
+      const entries = current.entries.filter((entry) => entry.id !== id)
+      // A hypothesis first reported here moves to the earliest remaining
+      // table, or goes with the entry when none is left.
+      const earliest = orderedEntries({ ...current, entries })[0]
+      const hypotheses = current.hypotheses.flatMap((hypothesis) =>
+        hypothesis.entryId !== id ? [hypothesis] : earliest ? [{ ...hypothesis, entryId: earliest.id }] : [],
+      )
+      return { ...current, entries, hypotheses }
+    })
+    setActiveId((current) => (current === id ? null : current))
   }
 
-  const saveRating = () => {
-    if (active === null || !selectedHyp || pendingValue === null) return
-    const hyp = hypotheses.find((h) => h.id === selectedHyp)
-    if (!hyp) return
-    const updatedPct = pendingPct ?? hyp.pct
-    const nextHypotheses = hypotheses.map((h) =>
-      h.id === selectedHyp ? { ...h, pct: updatedPct, history: [...h.history, updatedPct].slice(-12) } : h,
-    )
-    const nextRatings: Record<number, CueRating> = {
-      ...ratings,
-      [active]: { utterance: active, value: pendingValue, hypothesisId: selectedHyp, updatedPct },
-    }
-    setHypotheses(nextHypotheses)
-    setRatings(nextRatings)
-    persist(nextHypotheses, nextRatings)
-    // Advance to the next unrated utterance.
-    for (let i = active + 1; i < utterances.length; i++) {
-      if (!nextRatings[i]) {
-        selectUtterance(i)
-        utteranceRefs.current[i]?.scrollIntoView({ block: "center", behavior: "smooth" })
-        return
-      }
-    }
-    setActive(null)
-  }
+  const patchEntry = (id: string, patch: Partial<RecallEntry>) =>
+    update((current) => ({
+      ...current,
+      entries: current.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+    }))
 
-  const sessionPayload = useCallback(() => {
-    const timeline = timelineRef.current
-    return {
-      encounter_id: encounter.id,
-      exported_at: new Date().toISOString(),
-      hypotheses,
-      ratings: Object.values(ratings)
-        .sort((a, b) => a.utterance - b.utterance)
-        .map((r) => ({
-          ...r,
-          utterance_text: utterances[r.utterance]?.text ?? "",
-          speaker: utterances[r.utterance]?.speaker ?? null,
-        })),
-      // Timing of the recall recording: segment the audio per utterance by
-      // cutting between consecutive clicks (offsets are recorded time, so
-      // they map directly onto the audio file even across pauses).
-      recording: timeline
-        ? {
-            started_at: timeline.startedAt,
-            stopped_at: timeline.stoppedAt ?? null,
-            duration_seconds: timeline.durationSeconds ?? null,
-            utterance_clicks: timeline.utteranceClicks.map((c) => ({
-              utterance: c.utterance,
-              audio_offset_seconds: c.audioOffsetSeconds,
-              at: c.at,
-            })),
-          }
-        : null,
-    }
-  }, [encounter.id, hypotheses, ratings, utterances])
+  const rate = (entryId: string, hypothesisId: string, patch: Partial<RecallRating>) =>
+    update((current) => ({
+      ...current,
+      entries: current.entries.map((entry) => {
+        if (entry.id !== entryId) return entry
+        const existing: RecallRating = entry.ratings[hypothesisId] ?? { likelihood: null, support: null }
+        return { ...entry, ratings: { ...entry.ratings, [hypothesisId]: { ...existing, ...patch } } }
+      }),
+    }))
+
+  const addHypothesis = (entryId: string, name: string) =>
+    update((current) => ({
+      ...current,
+      hypotheses: [...current.hypotheses, { id: crypto.randomUUID(), name, entryId }],
+    }))
+
+  // Removing a hypothesis takes it off every table, ratings included.
+  const removeHypothesis = (hypothesisId: string) =>
+    update((current) => ({
+      ...current,
+      hypotheses: current.hypotheses.filter((hypothesis) => hypothesis.id !== hypothesisId),
+      entries: current.entries.map((entry) => {
+        if (!(hypothesisId in entry.ratings)) return entry
+        const ratings = { ...entry.ratings }
+        delete ratings[hypothesisId]
+        return { ...entry, ratings }
+      }),
+    }))
+
+  // ── Recording, archival, export ───────────────────────────────────────────
+  const sessionPayload = useCallback(
+    () =>
+      buildRecallPayload({
+        encounterId: encounter.id,
+        session: sessionRef.current,
+        turns,
+        exchanges,
+        exchangesDetected: analysisFresh,
+        clinicianSpeaker,
+        speakerLabel,
+      }),
+    [analysisFresh, clinicianSpeaker, encounter.id, exchanges, speakerLabel, turns],
+  )
 
   const startRecall = async () => {
     try {
       await recorder.startRecording()
       // Fresh timeline per take: a re-record replaces the audio, so it
       // replaces the click timings too.
-      timelineRef.current = { startedAt: new Date().toISOString(), utteranceClicks: [] }
+      update((current) => ({ ...current, timeline: { startedAt: new Date().toISOString(), utteranceClicks: [] } }))
       recordedMsRef.current = 0
       runningSinceRef.current = performance.now()
       setRecallStatus("recording")
@@ -373,36 +437,34 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
           setRecallStatus("skipped")
           return
         }
-        archivedAtRef.current = new Date().toISOString()
-        persist(hypotheses, ratings)
+        update((current) => ({ ...current, recallArchivedAt: new Date().toISOString() }))
         recallBlobRef.current = null
         setRecallStatus("archived")
       } catch {
         setRecallStatus("failed")
       }
     },
-    [encounter.created_at, encounter.id, hypotheses, persist, ratings, sessionPayload],
+    [encounter.created_at, encounter.id, sessionPayload, update],
   )
 
   const stopRecall = async () => {
-    if (timelineRef.current) {
-      timelineRef.current.stoppedAt = new Date().toISOString()
-      timelineRef.current.durationSeconds = recordedOffsetSeconds()
-    }
+    const durationSeconds = recordedOffsetSeconds()
     runningSinceRef.current = null
+    update((current) =>
+      current.timeline
+        ? { ...current, timeline: { ...current.timeline, stoppedAt: new Date().toISOString(), durationSeconds } }
+        : current,
+    )
     const blob = await recorder.stopRecording()
     recallBlobRef.current = blob
-    // Keep the timeline even if archival fails or is not configured.
-    persist(hypotheses, ratings)
     if (blob) {
-      // Store locally right away so the strip morphs into a playable player;
-      // the archived copy uploads in the background.
-      void saveEncounterAudio(
-        recallKey,
-        new File([blob], "recall_audio.wav", { type: blob.type || "audio/wav" }),
-      ).catch(() => undefined)
+      // Store locally right away so the player appears; the archived copy
+      // uploads in the background.
+      void saveEncounterAudio(recallKey, new File([blob], "recall_audio.wav", { type: blob.type || "audio/wav" })).catch(
+        () => undefined,
+      )
       setHasRecallAudio(true)
-      setRecallAudioVersion((v) => v + 1)
+      setRecallAudioVersion((version) => version + 1)
     }
     await uploadRecall(blob)
   }
@@ -410,14 +472,14 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
   const exportSession = () => {
     const blob = new Blob([JSON.stringify(sessionPayload(), null, 2)], { type: "application/json" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `stimulated_recall_${encounter.id}.json`
-    a.click()
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `stimulated_recall_${encounter.id}.json`
+    anchor.click()
     URL.revokeObjectURL(url)
   }
 
-  if (utterances.length === 0) {
+  if (turns.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
         <p className="text-sm text-muted-foreground">
@@ -427,308 +489,197 @@ export function StimulatedRecallView({ encounter }: { encounter: Encounter }) {
     )
   }
 
-  const activeUtterance = active !== null ? utterances[active] : null
-  const selectedHypothesis = hypotheses.find((h) => h.id === selectedHyp) ?? null
-  const ratedCount = Object.keys(ratings).length
+  const nothingToExport = session.entries.length === 0 && session.hypotheses.length === 0
 
   return (
-    <div>
-      {/* Recall-interview audio strip: the same recording control as the
-          consultation capture, morphing into a player once recorded. */}
-      <div className="mb-6 rounded-2xl border border-border bg-card p-4 shadow-soft">
-        {recallStatus === "recording" ? (
-          <RecordingBar
-            duration={recorder.duration}
-            isPaused={recorder.isPaused}
-            analyser={recorder.analyser}
-            onStop={() => void stopRecall()}
-            onPause={pauseRecall}
-            onResume={resumeRecall}
-            stopLabel="Stop & archive"
-          />
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            {hasRecallAudio ? (
-              <AudioPlayer
-                key={`${recallKey}:${recallAudioVersion}`}
-                audioKey={recallKey}
-                className="min-w-0 flex-1"
-              />
+    <div className="flex flex-col gap-4 lg:min-h-0 lg:flex-1">
+      {/* The interview's script and scales, with the recording and export
+          actions: the row that stays when the prompt is folded away. */}
+      <section className={cn(CARD, "shrink-0")}>
+        <div className="flex min-h-8 flex-wrap items-center gap-3 px-5 py-3">
+          <h2 className="text-sm font-semibold text-foreground">Recall prompt</h2>
+          <button
+            type="button"
+            onClick={() => setPromptOpen((open) => !open)}
+            aria-expanded={promptOpen}
+            className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            {promptOpen ? "Hide" : "Show"}
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            {recallStatus === "recording" ? (
+              <span className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card pl-2.5 pr-1">
+                <span className={cn("h-[7px] w-[7px] rounded-full bg-primary", !recorder.isPaused && "animate-pulse")} />
+                <span className="font-mono text-xs text-foreground">{formatDuration(recorder.duration)}</span>
+                <button
+                  type="button"
+                  onClick={recorder.isPaused ? resumeRecall : pauseRecall}
+                  title={recorder.isPaused ? "Resume recording" : "Pause recording"}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                >
+                  {recorder.isPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+                  <span className="sr-only">{recorder.isPaused ? "Resume" : "Pause"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void stopRecall()}
+                  title="Stop and archive the recording"
+                  className="rounded p-1 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  <span className="sr-only">Stop and archive</span>
+                </button>
+              </span>
             ) : (
-              <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                Record the recall interview alongside your ratings.
-              </p>
+              <>
+                {recallStatus === "saving" && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Archiving
+                  </span>
+                )}
+                {recallStatus === "archived" && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success">
+                    <Check className="h-3.5 w-3.5" /> Archived
+                  </span>
+                )}
+                {recallStatus === "skipped" && <span className="text-xs text-muted-foreground">Archiving not configured</span>}
+                {recallStatus === "failed" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void uploadRecall(recallBlobRef.current)}
+                    className="h-8 rounded-md border-destructive/40 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    <span className="text-xs">Archive failed, retry</span>
+                  </Button>
+                )}
+                {recallStatus !== "saving" && (
+                  <Button size="sm" onClick={() => void startRecall()} className="h-8 rounded-md px-3">
+                    <Mic className="mr-1.5 h-3.5 w-3.5" />
+                    <span className="text-xs">{hasRecallAudio ? "Re-record" : "Record recall"}</span>
+                  </Button>
+                )}
+              </>
             )}
-            {recallStatus === "saving" && (
-              <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Archiving…
-              </span>
-            )}
-            {recallStatus === "archived" && (
-              <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-success">
-                <Check className="h-3.5 w-3.5" /> Archived
-              </span>
-            )}
-            {recallStatus === "skipped" && (
-              <span className="shrink-0 text-xs text-muted-foreground">Archiving not configured</span>
-            )}
-            {recallStatus === "failed" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void uploadRecall(recallBlobRef.current)}
-                className="h-8 shrink-0 rounded-full border-destructive/40 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              >
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                <span className="text-xs">Archive failed — retry</span>
-              </Button>
-            )}
-            {recallStatus !== "saving" && (
-              <Button
-                size="sm"
-                onClick={() => void startRecall()}
-                className="h-9 shrink-0 rounded-full bg-primary px-4 text-primary-foreground shadow-soft hover:bg-brand-strong"
-              >
-                <Mic className="mr-1.5 h-3.5 w-3.5" />
-                <span className="text-xs">{hasRecallAudio ? "Re-record" : "Record recall"}</span>
-              </Button>
-            )}
+            <Button variant="outline" size="sm" onClick={exportSession} disabled={nothingToExport} className="h-8 rounded-md px-3">
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              <span className="text-xs">Export</span>
+            </Button>
+          </div>
+        </div>
+        {promptOpen && (
+          <div className="grid gap-x-10 gap-y-4 border-t border-border px-5 py-4 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-center">
+            <p className="text-[13.5px] leading-[21px] text-foreground/90">{PROMPT}</p>
+            <div className="grid gap-8 sm:grid-cols-2">
+              <Scale
+                title="Likelihood"
+                labels={["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]}
+                minorEvery={1}
+                ends={["Highly unlikely", "Highly likely"]}
+              />
+              <Scale
+                title="Information support"
+                labels={["−10", "−5", "0", "+5", "+10"]}
+                minorEvery={5}
+                ends={["Rules out", "No effect", "Confirms"]}
+              />
+            </div>
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[1fr_340px]">
-        {/* Transcript thread */}
-        <section>
-          <div className="mb-3 flex items-baseline justify-between px-1">
-            <h2 className="text-sm font-semibold text-foreground">Consultation transcript</h2>
-            <span className="text-xs text-muted-foreground">
-              {active !== null ? `Utterance ${active + 1} of ${utterances.length}` : `${utterances.length} utterances`}
-              {" · "}
-              {ratedCount} rated
-            </span>
-          </div>
-          <div className="flex flex-col gap-2">
-            {utterances.map((utterance, i) => {
-              const isActive = active === i
-              const isRated = Boolean(ratings[i])
-              return (
-                <button
-                  key={i}
-                  ref={(el) => {
-                    utteranceRefs.current[i] = el
-                  }}
-                  onClick={() => selectUtterance(i)}
-                  className={cn(
-                    "relative grid grid-cols-[72px_1fr] gap-3 overflow-hidden rounded-xl border p-3.5 text-left transition-all",
-                    isActive
-                      ? "border-primary bg-brand-soft/50 shadow-soft ring-1 ring-primary/30"
-                      : "border-border bg-card hover:border-input",
-                  )}
-                >
-                  {isActive && <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-primary" />}
-                  <div>
-                    <span
-                      className={cn(
-                        "text-[11px] font-semibold tracking-wide",
-                        utterance.speaker % 2 === 0 ? "text-primary" : "text-warning-foreground/70",
-                      )}
-                    >
-                      Speaker {utterance.speaker + 1}
-                    </span>
-                    <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">#{i + 1}</span>
-                  </div>
-                  <div>
-                    <p className="text-[0.92rem] leading-6 text-foreground/90">{utterance.text}</p>
-                    {isRated && (
-                      <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-success">
-                        <Check className="h-3.5 w-3.5" /> rated {ratings[i].value > 0 ? `+${ratings[i].value}` : ratings[i].value}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </section>
+      {hasRecallAudio && recallStatus !== "recording" && (
+        <AudioPlayer key={`${recallKey}:${recallAudioVersion}`} audioKey={recallKey} className={cn(CARD, "shrink-0 px-5 py-3")} />
+      )}
 
-        {/* Rail */}
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-6">
-          {/* Hypotheses */}
-          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold text-foreground">Your hypotheses</h3>
-              <span className="text-xs text-muted-foreground">
-                {active !== null ? `at utterance ${active + 1}` : "current"}
-              </span>
-            </div>
-            <div className="flex flex-col gap-3 p-4">
-              {hypotheses.length === 0 && loaded && (
-                <p className="px-1 text-center text-xs text-muted-foreground">
-                  Name the diagnoses you were considering during this consultation.
-                </p>
+      {!loaded ? (
+        <div className="flex flex-1 items-center justify-center py-16">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[640px_minmax(0,1fr)]">
+          {/* Transcript */}
+          <section className={cn(CARD, "flex flex-col lg:min-h-0")}>
+            <div className="flex min-h-8 items-center gap-3 px-5 py-3">
+              <h2 className="text-sm font-semibold text-foreground">Transcript</h2>
+              {detecting && (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Finding questions
+                </span>
               )}
-              {hypotheses.map((h) => (
-                <div
-                  key={h.id}
-                  className={cn(
-                    "flex flex-col gap-2 rounded-xl border p-3",
-                    h.id === leadingId ? "border-primary/40 bg-brand-soft/40" : "border-border bg-background",
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground">{h.name}</span>
-                    {h.id === leadingId && (
-                      <span className="rounded-full border border-primary/40 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-primary">
-                        leading
-                      </span>
-                    )}
-                    <span className="ml-auto font-mono text-sm font-semibold text-foreground">{h.pct}%</span>
-                    <button
-                      type="button"
-                      onClick={() => removeHypothesis(h.id)}
-                      title={`Remove ${h.name} (also removes its cue ratings)`}
-                      className="shrink-0 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      <span className="sr-only">Remove {h.name}</span>
-                    </button>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${h.pct}%` }} />
-                  </div>
-                  {h.history.length > 1 && (
-                    <div className="flex h-5 items-end gap-[3px]" title="Likelihood after each rated cue">
-                      {h.history.map((v, j) => (
-                        <span
-                          key={j}
-                          className="w-1.5 rounded-sm bg-primary/50"
-                          style={{ height: `${Math.max(12, v)}%` }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <input
-                  value={newHypName}
-                  onChange={(e) => setNewHypName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addHypothesis()
-                  }}
-                  placeholder="Name a hypothesis you had…"
-                  aria-label="New hypothesis"
-                  className="min-w-0 flex-1 rounded-lg border border-dashed border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                />
-                <Button variant="outline" size="sm" onClick={addHypothesis} className="h-9 shrink-0 rounded-lg px-3">
-                  <Plus className="h-4 w-4" />
-                </Button>
+              <div className="ml-auto flex items-center gap-3">
+                {selected.length > 0 ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">{selected.length} selected</span>
+                    <Button size="sm" onClick={addEntry} className="h-7 rounded-md px-2.5">
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      <span className="text-xs">Add recall</span>
+                    </Button>
+                  </>
+                ) : (
+                  exchanges.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span aria-hidden className="inline-block h-3 w-0.5 rounded-full bg-primary/40" />
+                      question and answer
+                    </span>
+                  )
+                )}
               </div>
             </div>
-          </div>
-
-          {/* Cue rating */}
-          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold text-foreground">Rate this cue</h3>
-              {active !== null && <span className="text-xs text-muted-foreground">utterance #{active + 1}</span>}
+            <div className="border-t border-border px-5 py-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+              <RecallTranscript
+                turns={turns}
+                speakerLabel={speakerLabel}
+                accentSpeaker={accentSpeaker}
+                exchanges={exchanges}
+                entries={transcriptEntries}
+                activeEntryId={activeId}
+                selected={selected}
+                onTurnClick={onTurnClick}
+                registerTurn={(index, element) => {
+                  turnRefs.current[index] = element
+                }}
+              />
             </div>
-            <div className="flex flex-col gap-3.5 p-4">
-              {!activeUtterance && (
-                <p className="px-1 py-2 text-center text-xs text-muted-foreground">
-                  Select an utterance to rate how it shaped your thinking.
-                </p>
-              )}
-              {activeUtterance && hypotheses.length === 0 && (
-                <p className="px-1 py-2 text-center text-xs text-muted-foreground">Add a hypothesis first.</p>
-              )}
-              {activeUtterance && hypotheses.length > 0 && (
-                <>
-                  <div className="text-xs text-foreground/75">
-                    How much does this cue support your hypothesis of{" "}
-                    <select
-                      value={selectedHyp ?? ""}
-                      onChange={(e) => setSelectedHyp(e.target.value)}
-                      aria-label="Hypothesis being rated"
-                      className="inline-block max-w-full rounded-md border border-input bg-background px-1.5 py-0.5 font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      {hypotheses.map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.name}
-                        </option>
-                      ))}
-                    </select>
-                    ?
-                  </div>
-                  <div>
-                    <div className="grid grid-cols-7 gap-1.5">
-                      {SCALE_VALUES.map((v) => (
-                        <button
-                          key={v}
-                          onClick={() => setPendingValue(v)}
-                          aria-label={`Rate ${v}`}
-                          className={cn(
-                            "aspect-square rounded-lg font-mono text-sm font-bold text-white transition-all",
-                            SCALE_CLASS[v],
-                            pendingValue === v
-                              ? "-translate-y-0.5 opacity-100 shadow-soft ring-2 ring-foreground/70 ring-offset-1"
-                              : "opacity-40 hover:opacity-80",
-                          )}
-                        >
-                          {v > 0 ? `+${v}` : v}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-                      <span>strongly against</span>
-                      <span>neutral</span>
-                      <span>strongly supports</span>
-                    </div>
-                  </div>
-                  {selectedHypothesis && (
-                    <div className="flex items-center gap-2.5 pt-1">
-                      <label htmlFor="sr-updated-pct" className="flex-1 text-xs text-foreground/75">
-                        Updated likelihood of <b className="font-semibold text-foreground">{selectedHypothesis.name}</b>
-                      </label>
-                      <input
-                        id="sr-updated-pct"
-                        type="range"
-                        min={0}
-                        max={100}
-                        value={pendingPct ?? selectedHypothesis.pct}
-                        onChange={(e) => setPendingPct(Number(e.target.value))}
-                        className="flex-1 accent-[var(--primary,#45719e)]"
-                      />
-                      <span className="min-w-[42px] text-right font-mono text-sm font-semibold text-foreground">
-                        {pendingPct ?? selectedHypothesis.pct}%
-                      </span>
-                    </div>
-                  )}
-                  <Button
-                    onClick={saveRating}
-                    disabled={pendingValue === null}
-                    className="w-full rounded-xl bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
-                  >
-                    Save rating &amp; continue
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
+          </section>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={exportSession}
-            disabled={ratedCount === 0 && hypotheses.length === 0}
-            className="rounded-full"
-          >
-            <Download className="mr-1.5 h-4 w-4" />
-            <span className="text-xs">Export session data</span>
-          </Button>
-        </aside>
-      </div>
+          {/* Recall: one table per stop, in transcript order */}
+          <section className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+            <h2 className="shrink-0 px-1 text-sm font-semibold text-foreground">Recall</h2>
+            {entryViews.length === 0 && (
+              <p className="px-1 text-xs text-muted-foreground">
+                Select the turns the clinician stopped at in the transcript, then add a recall.
+              </p>
+            )}
+            {entryViews.map((view) => (
+              <RecallEntryCard
+                key={view.entry.id}
+                number={view.number}
+                entry={view.entry}
+                excerpt={view.excerpt}
+                isQuestion={view.isQuestion}
+                rows={view.rows}
+                active={view.entry.id === activeId}
+                onActivate={() => activateEntry(view.entry.id, true)}
+                onChange={(patch) => patchEntry(view.entry.id, patch)}
+                onRate={(hypothesisId, patch) => rate(view.entry.id, hypothesisId, patch)}
+                onAddHypothesis={(name) => addHypothesis(view.entry.id, name)}
+                onRemoveHypothesis={removeHypothesis}
+                onRemove={() => removeEntry(view.entry.id)}
+                cardRef={(element) => {
+                  if (element) entryRefs.current.set(view.entry.id, element)
+                  else entryRefs.current.delete(view.entry.id)
+                }}
+              />
+            ))}
+            <FinalDiagnosisCard
+              rows={session.finalDiagnosis}
+              onChange={(rows) => update((current) => ({ ...current, finalDiagnosis: rows }))}
+            />
+          </section>
+        </div>
+      )}
     </div>
   )
 }

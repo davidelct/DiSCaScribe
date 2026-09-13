@@ -2,24 +2,27 @@
 
 /**
  * One consultation's stimulated-recall interview, reached from the recall
- * tab. The interview itself — hypotheses, per-utterance ratings, the recall
- * recording and its archival — is the render package's StimulatedRecallView;
- * this page frames it with the consultation's identity and a way back.
+ * tab. The interview itself — the transcript with its question–answer
+ * exchanges, the per-stop tables, the recall recording and its archival — is
+ * the render package's StimulatedRecallView; this page frames it with the
+ * consultation's identity and a way back, and lends it the server action
+ * that detects exchanges for a consultation that has none yet.
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { format } from "date-fns"
 import { ArrowLeft, FileQuestion, Loader2 } from "lucide-react"
 import { ErrorBoundary, useEncounters, useHttpsWarning } from "@ui"
 import { cn } from "@ui/lib/utils"
 import { StimulatedRecallView } from "@note-rendering"
-import { getPatient, isLinkedToPatient } from "@storage"
+import { getPatient, isLinkedToPatient, loadByokApiKeys } from "@storage"
 import type { Encounter } from "@storage/types"
+import { detectRecallExchanges } from "@/app/actions"
 import { TopBar } from "../../top-bar"
 
 function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
-  const { encounters } = useEncounters()
+  const { encounters, updateEncounter } = useEncounters()
   const httpsWarning = useHttpsWarning()
   const encounter = encounters.find((e: Encounter) => e.id === encounterId)
 
@@ -30,6 +33,17 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
     const timer = setTimeout(() => setHydrationGraceOver(true), 1500)
     return () => clearTimeout(timer)
   }, [])
+
+  // Detection normally runs beside note generation; older consultations, and
+  // any where it failed, get it here on first open.
+  const detectExchanges = useCallback(
+    async (transcript: string) => {
+      const byokKeys = await loadByokApiKeys()
+      const analysis = await detectRecallExchanges({ transcript }, { anthropicApiKey: byokKeys.anthropicApiKey })
+      await updateEncounter(encounterId, { recall_analysis: analysis })
+    },
+    [encounterId, updateEncounter],
+  )
 
   if (!encounter) {
     return (
@@ -73,7 +87,7 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
         {/* Same identity row as the consultation workspace, so the clinician
             knows whose consultation they are stepping back through. */}
         <div className="shrink-0 border-b border-border bg-card/60 px-6 py-2 backdrop-blur-sm">
-          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-2.5 gap-y-1">
+          <div className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-1">
             <Link
               href={back.href}
               title={back.title}
@@ -101,10 +115,10 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
             </div>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-6xl px-6 py-4">
-            <StimulatedRecallView encounter={encounter} />
-          </div>
+        {/* The two columns scroll on their own from lg up; narrower than
+            that they stack and the page scrolls. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-4 lg:overflow-hidden">
+          <StimulatedRecallView encounter={encounter} detectExchanges={detectExchanges} />
         </div>
       </main>
     </div>

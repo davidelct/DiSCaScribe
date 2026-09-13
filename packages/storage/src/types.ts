@@ -108,6 +108,32 @@ export interface NoteVersion {
  */
 export type ApprovalStatus = "draft" | "approved"
 
+/**
+ * A question–answer exchange in the diarised transcript, for stimulated
+ * recall: the clinician's question turn and the last turn of the patient's
+ * answer (usually the next turn). Indices into parseDiarizedTranscript's turns.
+ */
+export interface RecallExchange {
+  question: number
+  answer_end: number
+}
+
+/**
+ * What a small model made of the transcript for stimulated recall: the
+ * exchanges to bracket, and which speaker is the clinician. Detection runs
+ * beside note generation once the transcript is final, and again on opening
+ * the recall view if it is missing; turn_count tells a stale analysis from a
+ * fresh one should the transcript ever change.
+ */
+export interface RecallAnalysis {
+  exchanges: RecallExchange[]
+  /** The diarised speaker the model took for the clinician; absent when it could not tell. */
+  clinician_speaker?: number
+  turn_count: number
+  /** ISO 8601 timestamp of the detection. */
+  detected_at: string
+}
+
 export interface Encounter {
   id: string
   patient_name: string
@@ -131,6 +157,8 @@ export interface Encounter {
    * just without confidence marks.
    */
   transcript_confidence?: TranscriptWordSpan[]
+  /** Question–answer exchanges and speaker roles for stimulated recall; see RecallAnalysis. */
+  recall_analysis?: RecallAnalysis
   /**
    * Clinical note in markdown format
    * This is the primary storage format for notes
@@ -192,6 +220,9 @@ export type AuditEventType =
   | "note.generation_started"
   | "note.generated"
   | "note.generation_failed"
+  | "recall.detection_started"
+  | "recall.exchanges_detected"
+  | "recall.detection_failed"
   | "note.approved"
   | "settings.api_key_configured"
   | "settings.preferences_updated"

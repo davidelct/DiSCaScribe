@@ -31,7 +31,7 @@ import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
 import { formatKeyterms, resolveKeyterms, useSegmentUpload, type UploadError } from "@transcription"
-import { generateClinicalNote } from "@/app/actions"
+import { detectRecallExchanges, generateClinicalNote } from "@/app/actions"
 import { takeConsultationIntent } from "@/lib/consultation-intent"
 import {
   appendNoteVersion,
@@ -490,6 +490,26 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     [archiveEncounter, encounterId],
   )
 
+  /**
+   * Stimulated recall: bracket the transcript's question–answer exchanges.
+   * Launched beside note generation (both arms) and never awaited by the
+   * capture flow; a failure is logged and the recall view falls back to a
+   * question-mark heuristic, retrying detection when it opens.
+   */
+  const detectExchangesForEncounter = useCallback(
+    async (transcript: string) => {
+      try {
+        const byokKeys = await loadByokApiKeys()
+        const analysis = await detectRecallExchanges({ transcript }, { anthropicApiKey: byokKeys.anthropicApiKey })
+        await updateEncounterRef.current(encounterId, { recall_analysis: analysis })
+        debugLog(`✅ Recall exchanges saved to encounter (${analysis.exchanges.length})`)
+      } catch (err) {
+        debugError("Recall exchange detection failed:", err)
+      }
+    },
+    [encounterId],
+  )
+
   const processEncounterForNoteGeneration = useCallback(
     async (transcript: string) => {
       const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
@@ -569,6 +589,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             transcript_confidence: transcriptWords,
           })
           await refreshRef.current()
+          void detectExchangesForEncounter(transcript)
           const mode = encountersRef.current.find((e: Encounter) => e.id === encounterId)?.mode
           if (mode === "recording_only") {
             await completeRecordingOnlyEncounter(transcript)
@@ -581,7 +602,14 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         debugError("Failed to parse final transcript event", error)
       }
     },
-    [cleanupSession, completeRecordingOnlyEncounter, encounterId, isBlankTranscriptText, processEncounterForNoteGeneration],
+    [
+      cleanupSession,
+      completeRecordingOnlyEncounter,
+      detectExchangesForEncounter,
+      encounterId,
+      isBlankTranscriptText,
+      processEncounterForNoteGeneration,
+    ],
   )
 
   const handleStreamError = useCallback((event: MessageEvent | Event) => {
