@@ -6,12 +6,13 @@ import { getEncounterAudio } from "@storage/audio-store"
  * Stimulated recall (WT3.1) session data.
  *
  * The clinician goes back over the transcript with an interviewer and stops
- * at turns of their choosing. Each stop is an entry: what they remember
- * thinking, and a table of the diagnostic hypotheses they held with a
- * likelihood (0–10) and how much the answer supported each (−10..+10). The
- * table carries forward: a hypothesis reported at one stop is on every later
- * table, and a likelihood not re-rated at a stop is the one from the stop
- * before. Sessions are persisted per encounter in the encrypted store.
+ * at turns of their choosing. Each stop is an entry holding the template's
+ * table: one row per hypothesis with why the question was asked, what the
+ * clinician was thinking when asking, the hypothesis, its likelihood (0–10)
+ * and how much the answer supported it (−10..+10). The table carries
+ * forward: a hypothesis reported at one stop is on every later table, and a
+ * likelihood not re-rated at a stop is the one from the stop before.
+ * Sessions are persisted per encounter in the encrypted store.
  */
 
 export interface RecallHypothesis {
@@ -21,19 +22,24 @@ export interface RecallHypothesis {
   entryId: string
 }
 
+/** One row of the table at one entry. */
 export interface RecallRating {
+  /** Why did you ask that? */
+  why: string
+  /** Reason for asking a question: what were you thinking when you asked that? */
+  reason: string
   /** 0–10 as reported at this entry; null means carried over from the previous table. */
   likelihood: number | null
   /** −10..+10; null when not rated at this entry. */
   support: number | null
 }
 
+export const EMPTY_RATING: RecallRating = { why: "", reason: "", likelihood: null, support: null }
+
 export interface RecallEntry {
   id: string
   /** Transcript turns the entry is about, ascending. */
   turns: number[]
-  why: string
-  thinking: string
   notes: string
   /** By hypothesis id. */
   ratings: Record<string, RecallRating>
@@ -109,11 +115,36 @@ export async function loadRecallSession(encounterId: string): Promise<RecallSess
   return {
     version: 2,
     hypotheses: saved.hypotheses ?? [],
-    entries: saved.entries ?? [],
+    entries: (saved.entries ?? []).map(migrateEntry),
     finalDiagnosis: saved.finalDiagnosis ?? [],
     timeline: saved.timeline,
     recallArchivedAt: saved.recallArchivedAt,
   }
+}
+
+/**
+ * Entries saved by the first cut of this view kept a single "why" and
+ * "thinking" per stop; the template has them per row. Fold them into the
+ * first row that exists, else into the notes, so nothing typed is lost.
+ */
+function migrateEntry(raw: RecallEntry & { why?: string; thinking?: string }): RecallEntry {
+  const { why, thinking, ...entry } = raw
+  const ratings: Record<string, RecallRating> = Object.fromEntries(
+    Object.entries(entry.ratings ?? {}).map(([id, rating]) => [id, { ...EMPTY_RATING, ...rating }]),
+  )
+  const legacy = { why: why?.trim() ?? "", thinking: thinking?.trim() ?? "" }
+  let notes = entry.notes ?? ""
+  if (legacy.why || legacy.thinking) {
+    const firstRow = Object.keys(ratings)[0]
+    if (firstRow) {
+      ratings[firstRow] = { ...ratings[firstRow], why: ratings[firstRow].why || legacy.why, reason: ratings[firstRow].reason || legacy.thinking }
+    } else {
+      notes = [notes, legacy.why && `Why: ${legacy.why}`, legacy.thinking && `Thinking: ${legacy.thinking}`]
+        .filter(Boolean)
+        .join("\n")
+    }
+  }
+  return { ...entry, notes, ratings }
 }
 
 export function saveRecallSession(encounterId: string, session: RecallSession): Promise<void> {
@@ -227,14 +258,15 @@ export function buildRecallPayload(input: RecallPayloadInput) {
         text: turns[index]?.text ?? "",
       })),
       is_question: questionTurns.has(entry.turns[0]),
-      why: entry.why,
-      thinking: entry.thinking,
       notes: entry.notes,
-      ratings: hypothesesAt(session, ordered, position).map((hypothesis) => {
+      // The template's table, one row per hypothesis.
+      rows: hypothesesAt(session, ordered, position).map((hypothesis) => {
         const rating = entry.ratings[hypothesis.id]
         const reported = rating?.likelihood ?? null
         const carried = reported === null ? carriedLikelihood(ordered, position, hypothesis.id) : null
         return {
+          why: rating?.why ?? "",
+          reason: rating?.reason ?? "",
           hypothesis_id: hypothesis.id,
           hypothesis: hypothesis.name,
           likelihood: reported ?? carried,

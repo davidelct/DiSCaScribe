@@ -12,6 +12,7 @@ import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
 import { FinalDiagnosisCard, RecallEntryCard, type EntryRow } from "./recall-entry"
 import {
+  EMPTY_RATING,
   buildRecallPayload,
   carriedLikelihood,
   emptyRecallSession,
@@ -32,11 +33,12 @@ import {
  * Two columns. Left, the consultation transcript as it reads in the
  * consultation view, every turn clickable and the question–answer exchanges
  * bracketed (detected by a small model beside note generation, or by a
- * question-mark heuristic until then). Right, one table per stop in
- * transcript order: what the clinician remembers thinking, and each
- * hypothesis they held with its likelihood and how much the answer supported
- * it. A new table starts from the previous one. The recall interview can be
- * recorded alongside, with every turn click timed against the recording.
+ * question-mark heuristic until then). Right, the template's table once per
+ * stop in transcript order: a row per hypothesis with why the question was
+ * asked, what the clinician was thinking, the hypothesis, its likelihood and
+ * how much the answer supported it. A new table starts from the previous
+ * one. The recall interview can be recorded alongside, with every turn click
+ * timed against the recording.
  */
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
@@ -225,33 +227,31 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
 
   // ── Derived views ──────────────────────────────────────────────────────────
   const ordered = useMemo(() => orderedEntries(session), [session])
-  const questionTurns = useMemo(() => new Set(exchanges.map((exchange) => exchange.question)), [exchanges])
   const entryViews = useMemo(
     () =>
       ordered.map((entry, position) => {
         const rows: EntryRow[] = hypothesesAt(session, ordered, position).map((hypothesis) => {
-          const rating = entry.ratings[hypothesis.id]
+          const rating = entry.ratings[hypothesis.id] ?? EMPTY_RATING
           return {
             hypothesis,
-            isNew: hypothesis.entryId === entry.id,
-            likelihood: rating?.likelihood ?? null,
+            why: rating.why,
+            reason: rating.reason,
+            likelihood: rating.likelihood,
             carried: carriedLikelihood(ordered, position, hypothesis.id),
-            support: rating?.support ?? null,
+            support: rating.support,
           }
         })
-        const first = entry.turns[0]
         return {
           entry,
           number: position + 1,
           rows,
-          isQuestion: questionTurns.has(first) || /\?\s*$/.test(turns[first]?.text ?? ""),
           excerpt: entry.turns.map((index) => ({
             label: speakerLabel(turns[index]?.speaker ?? 0),
             text: turns[index]?.text ?? "",
           })),
         }
       }),
-    [ordered, questionTurns, session, speakerLabel, turns],
+    [ordered, session, speakerLabel, turns],
   )
   const entryByTurn = useMemo(() => {
     const map = new Map<number, RecallEntry>()
@@ -284,9 +284,12 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           : current,
       )
     }
+    // A turn that already has a table opens that table; clicking it again
+    // closes it, so the highlight never gets stuck.
     const owner = entryByTurn.get(index)
     if (owner) {
-      activateEntry(owner.id, false)
+      if (owner.id === activeId) setActiveId(null)
+      else activateEntry(owner.id, false)
       return
     }
     setSelected((current) => {
@@ -304,13 +307,29 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     })
   }
 
+  const clearSelection = () => setSelected([])
+
+  // Escape clears the selection, or closes the open table when nothing is selected.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+        target.blur()
+        return
+      }
+      if (selected.length > 0) setSelected([])
+      else setActiveId(null)
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [selected.length])
+
   const addEntry = () => {
     if (selected.length === 0) return
     const entry: RecallEntry = {
       id: crypto.randomUUID(),
       turns: [...selected].sort((a, b) => a - b),
-      why: "",
-      thinking: "",
       notes: "",
       ratings: {},
       createdAt: new Date().toISOString(),
@@ -346,7 +365,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       ...current,
       entries: current.entries.map((entry) => {
         if (entry.id !== entryId) return entry
-        const existing: RecallRating = entry.ratings[hypothesisId] ?? { likelihood: null, support: null }
+        const existing: RecallRating = entry.ratings[hypothesisId] ?? EMPTY_RATING
         return { ...entry, ratings: { ...entry.ratings, [hypothesisId]: { ...existing, ...patch } } }
       }),
     }))
@@ -612,6 +631,13 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 {selected.length > 0 ? (
                   <>
                     <span className="text-xs text-muted-foreground">{selected.length} selected</span>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    >
+                      Clear
+                    </button>
                     <Button size="sm" onClick={addEntry} className="h-7 rounded-md px-2.5">
                       <Plus className="mr-1 h-3.5 w-3.5" />
                       <span className="text-xs">Add recall</span>
@@ -658,7 +684,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 number={view.number}
                 entry={view.entry}
                 excerpt={view.excerpt}
-                isQuestion={view.isQuestion}
                 rows={view.rows}
                 active={view.entry.id === activeId}
                 onActivate={() => activateEntry(view.entry.id, true)}

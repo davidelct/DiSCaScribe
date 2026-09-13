@@ -13,18 +13,24 @@ import {
 } from "./recall-session"
 
 /**
- * One stop of the recall interview as a card: the turns it is about, what
- * the clinician remembers, and the hypothesis table. Only the active card
- * takes input; the others read as text so the column stays quiet.
+ * One stop of the recall interview as a card: the turns it is about, then
+ * the template's table — Why, Reason for asking a question, Hypothesis,
+ * Likelihood, Information support — one row per hypothesis, and Notes.
+ * Only the active card takes input; the others read as text so the column
+ * stays quiet.
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
 const LABEL = "text-xs text-muted-foreground"
 const TEXT_INPUT =
-  "w-full rounded-md border border-input bg-card px-2.5 py-[7px] text-[13.5px] leading-5 text-foreground " +
+  "w-full rounded-md border border-input bg-card px-2 py-1.5 text-[13px] leading-[18px] text-foreground " +
   "placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
-const TH = "pb-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground"
-const TD = "py-1.5 text-sm text-foreground"
+/** A table cell that reads as text until it is hovered or focused. */
+const CELL_INPUT =
+  "w-full rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[13px] leading-[18px] text-foreground " +
+  "placeholder:text-muted-foreground/70 hover:border-input focus-visible:border-primary focus-visible:outline-none"
+const TH = "pb-1.5 pr-3 text-left align-bottom text-xs font-medium text-muted-foreground"
+const TD = "py-1 pr-3 align-top text-[13px] leading-[18px] text-foreground"
 
 function formatSupport(value: number): string {
   return value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : "0"
@@ -63,7 +69,7 @@ function AutoTextarea({
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={label}
-      className={cn(TEXT_INPUT, "resize-none", className)}
+      className={cn(className ?? TEXT_INPUT, "resize-none")}
     />
   )
 }
@@ -142,10 +148,11 @@ export interface EntryExcerptLine {
   text: string
 }
 
+/** One row of the table: a hypothesis at this entry, with what the previous table carried. */
 export interface EntryRow {
   hypothesis: RecallHypothesis
-  /** First reported at this entry. */
-  isNew: boolean
+  why: string
+  reason: string
   /** As reported at this entry, or null when carried. */
   likelihood: number | null
   /** What the previous table had; what a null likelihood means. */
@@ -157,12 +164,10 @@ interface RecallEntryCardProps {
   number: number
   entry: RecallEntry
   excerpt: EntryExcerptLine[]
-  /** Whether the stop is a question the clinician asked (two prompts) or any other turn (one). */
-  isQuestion: boolean
   rows: EntryRow[]
   active: boolean
   onActivate: () => void
-  onChange: (patch: Partial<Pick<RecallEntry, "why" | "thinking" | "notes">>) => void
+  onChange: (patch: Partial<Pick<RecallEntry, "notes">>) => void
   onRate: (hypothesisId: string, patch: Partial<RecallRating>) => void
   onAddHypothesis: (name: string) => void
   onRemoveHypothesis: (hypothesisId: string) => void
@@ -174,7 +179,6 @@ export function RecallEntryCard({
   number,
   entry,
   excerpt,
-  isQuestion,
   rows,
   active,
   onActivate,
@@ -194,16 +198,18 @@ export function RecallEntryCard({
     setNewHypothesis("")
   }
 
-  const field = (label: string, key: "why" | "thinking" | "notes", placeholder: string) => (
-    <div className="flex flex-col gap-1">
-      <span className={LABEL}>{label}</span>
-      {active ? (
-        <AutoTextarea value={entry[key]} onChange={(value) => onChange({ [key]: value })} placeholder={placeholder} label={label} />
-      ) : (
-        <p className="text-[13.5px] leading-5 text-foreground">{entry[key]}</p>
-      )}
-    </div>
-  )
+  const textCell = (row: EntryRow, key: "why" | "reason", label: string, placeholder: string) =>
+    active ? (
+      <AutoTextarea
+        value={row[key]}
+        onChange={(value) => onRate(row.hypothesis.id, { [key]: value })}
+        placeholder={placeholder}
+        label={`${label} for ${row.hypothesis.name}`}
+        className={CELL_INPUT}
+      />
+    ) : (
+      <span className="block px-1.5 py-1">{row[key]}</span>
+    )
 
   return (
     <article
@@ -234,38 +240,26 @@ export function RecallEntryCard({
           </button>
         )}
       </header>
-      <div className="flex flex-col gap-3.5 border-t border-border px-4 pb-4 pt-3.5">
-        {isQuestion ? (
-          <>
-            {(active || entry.why) && field("Why did you ask that?", "why", "What the clinician remembers")}
-            {(active || entry.thinking) && field("What were you thinking when you asked?", "thinking", "What the clinician remembers")}
-          </>
-        ) : (
-          (active || entry.thinking) && field("What were you thinking at this point?", "thinking", "What the clinician remembers")
-        )}
-
-        <table className="w-full border-collapse">
+      <div className="flex flex-col gap-3 border-t border-border px-4 pb-4 pt-3">
+        {/* The template's table, one row per hypothesis. */}
+        <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={TH}>Hypothesis</th>
-              <th className={cn(TH, "w-[120px] text-center")}>Likelihood</th>
-              <th className={cn(TH, "w-[110px] text-center")}>Support</th>
+              <th className={cn(TH, "w-[25%] pl-1.5")}>Why</th>
+              <th className={cn(TH, "w-[28%] pl-1.5")}>Reason for asking</th>
+              <th className={cn(TH, "pl-1.5")}>Hypothesis</th>
+              <th className={cn(TH, "w-[80px] px-1 text-center")}>Likelihood</th>
+              <th className={cn(TH, "w-[72px] pr-0 text-center")}>Support</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={3} className="py-2 text-xs text-muted-foreground">
-                  {active ? "Add the hypotheses the clinician was holding at this point." : "No hypotheses yet."}
-                </td>
-              </tr>
-            )}
             {rows.map((row) => (
               <tr key={row.hypothesis.id} className="group border-b border-border/60 last:border-b-0">
-                <td className={TD}>
-                  <span className="inline-flex items-center gap-2">
+                <td className={TD}>{textCell(row, "why", "Why", "Why did you ask that?")}</td>
+                <td className={TD}>{textCell(row, "reason", "Reason", "What were you thinking?")}</td>
+                <td className={cn(TD, "text-sm")}>
+                  <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 py-1">
                     {row.hypothesis.name}
-                    {row.isNew && <span className="text-[11px] text-muted-foreground">new</span>}
                     {active && (
                       <button
                         type="button"
@@ -279,9 +273,9 @@ export function RecallEntryCard({
                     )}
                   </span>
                 </td>
-                <td className={cn(TD, "text-center")}>
+                <td className={cn(TD, "px-1 text-center")}>
                   {active ? (
-                    <span className="inline-flex items-center justify-center gap-1.5">
+                    <span className="inline-flex flex-col items-center gap-0.5">
                       <NumberField
                         value={row.likelihood}
                         carried={row.carried}
@@ -291,20 +285,18 @@ export function RecallEntryCard({
                         label={`Likelihood of ${row.hypothesis.name}`}
                       />
                       {row.likelihood !== null && row.carried !== null && row.likelihood !== row.carried && (
-                        <span className="font-mono text-[10.5px] text-muted-foreground">was {row.carried}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">was {row.carried}</span>
                       )}
                     </span>
                   ) : row.likelihood !== null ? (
-                    <span className="font-mono text-[13px] font-semibold">{row.likelihood}</span>
+                    <span className="inline-block py-1 font-mono text-[13px] font-semibold">{row.likelihood}</span>
                   ) : row.carried !== null ? (
-                    <span className="font-mono text-[13px] font-semibold text-muted-foreground" title="Carried over from the previous table">
+                    <span className="inline-block py-1 font-mono text-[13px] font-semibold text-muted-foreground" title="Carried over from the previous table">
                       {row.carried}
                     </span>
-                  ) : (
-                    <span className="text-muted-foreground">–</span>
-                  )}
+                  ) : null}
                 </td>
-                <td className={cn(TD, "text-center")}>
+                <td className={cn(TD, "pr-0 text-center")}>
                   {active ? (
                     <NumberField
                       value={row.support}
@@ -314,10 +306,8 @@ export function RecallEntryCard({
                       label={`Support for ${row.hypothesis.name}`}
                     />
                   ) : row.support !== null ? (
-                    <span className={cn("font-mono text-[13px] font-semibold", supportClass(row.support))}>{formatSupport(row.support)}</span>
-                  ) : (
-                    <span className="text-muted-foreground">–</span>
-                  )}
+                    <span className={cn("inline-block py-1 font-mono text-[13px] font-semibold", supportClass(row.support))}>{formatSupport(row.support)}</span>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -337,7 +327,7 @@ export function RecallEntryCard({
               }}
               placeholder="Add a hypothesis"
               aria-label="New hypothesis"
-              className={cn(TEXT_INPUT, "min-w-0 flex-1 border-dashed py-[6px]")}
+              className={cn(TEXT_INPUT, "min-w-0 flex-1 border-dashed")}
             />
             <button
               type="button"
@@ -351,7 +341,16 @@ export function RecallEntryCard({
           </div>
         )}
 
-        {(active || entry.notes) && field("Notes", "notes", "Optional")}
+        {(active || entry.notes) && (
+          <div className="flex flex-col gap-0.5">
+            <span className={cn(LABEL, "px-1.5")}>Notes</span>
+            {active ? (
+              <AutoTextarea value={entry.notes} onChange={(notes) => onChange({ notes })} placeholder="Optional" label="Notes" className={CELL_INPUT} />
+            ) : (
+              <p className="px-1.5 text-[13px] leading-[18px] text-foreground">{entry.notes}</p>
+            )}
+          </div>
+        )}
       </div>
     </article>
   )
@@ -365,8 +364,8 @@ interface FinalDiagnosisCardProps {
 
 /**
  * The closing table: the diagnoses the clinician settled on, how likely,
- * why, and how hard the case was. Always editable; a blank row waits at the
- * bottom and becomes real as soon as something is typed into it.
+ * why, and how difficult the case was. Always editable; a blank row waits
+ * at the bottom and becomes real as soon as something is typed into it.
  */
 export function FinalDiagnosisCard({ rows, onChange, cardRef }: FinalDiagnosisCardProps) {
   const blank: FinalDiagnosisRow = { id: "", diagnosis: "", likelihood: null, why: "", difficulty: "" }
@@ -385,29 +384,29 @@ export function FinalDiagnosisCard({ rows, onChange, cardRef }: FinalDiagnosisCa
         <h3 className="text-sm font-semibold text-foreground">Final diagnosis</h3>
       </div>
       <div className="border-t border-border px-5 pb-4 pt-3">
-        <table className="w-full border-collapse">
+        <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={TH}>Diagnosis</th>
-              <th className={cn(TH, "w-[90px] text-center")}>Likelihood</th>
-              <th className={cn(TH, "w-[34%]")}>Why</th>
-              <th className={cn(TH, "w-[150px]")}>Case difficulty</th>
+              <th className={cn(TH, "w-[30%] pl-1.5")}>Diagnosis</th>
+              <th className={cn(TH, "w-[80px] px-1 text-center")}>Likelihood</th>
+              <th className={cn(TH, "pl-1.5")}>Why</th>
+              <th className={cn(TH, "w-[26%] pl-1.5")}>How difficult was the case?</th>
               <th className="w-6" />
             </tr>
           </thead>
           <tbody>
             {[...rows, blank].map((row) => (
               <tr key={row.id || "blank"} className="border-b border-border/60 last:border-b-0">
-                <td className="py-1.5 pr-3">
-                  <input
+                <td className="py-1 pr-3 align-top">
+                  <AutoTextarea
                     value={row.diagnosis}
-                    onChange={(event) => patchRow(row, { diagnosis: event.target.value })}
+                    onChange={(diagnosis) => patchRow(row, { diagnosis })}
                     placeholder={row.id ? "" : "Add a diagnosis"}
-                    aria-label="Diagnosis"
-                    className={cn(TEXT_INPUT, "py-[5px]")}
+                    label="Diagnosis"
+                    className={CELL_INPUT}
                   />
                 </td>
-                <td className="py-1.5 text-center">
+                <td className="py-1 px-1 text-center align-top">
                   <NumberField
                     value={row.likelihood}
                     min={LIKELIHOOD_RANGE.min}
@@ -416,29 +415,25 @@ export function FinalDiagnosisCard({ rows, onChange, cardRef }: FinalDiagnosisCa
                     label="Likelihood of the diagnosis"
                   />
                 </td>
-                <td className="py-1.5 pr-3">
-                  <input
-                    value={row.why}
-                    onChange={(event) => patchRow(row, { why: event.target.value })}
-                    aria-label="Why"
-                    className={cn(TEXT_INPUT, "py-[5px]")}
-                  />
+                <td className="py-1 pr-3 align-top">
+                  <AutoTextarea value={row.why} onChange={(why) => patchRow(row, { why })} placeholder="" label="Why" className={CELL_INPUT} />
                 </td>
-                <td className="py-1.5">
-                  <input
+                <td className="py-1 align-top">
+                  <AutoTextarea
                     value={row.difficulty}
-                    onChange={(event) => patchRow(row, { difficulty: event.target.value })}
-                    aria-label="Case difficulty"
-                    className={cn(TEXT_INPUT, "py-[5px]")}
+                    onChange={(difficulty) => patchRow(row, { difficulty })}
+                    placeholder=""
+                    label="How difficult was the case?"
+                    className={CELL_INPUT}
                   />
                 </td>
-                <td className="py-1.5 pl-1.5 text-right">
+                <td className="py-1 pl-1.5 text-right align-top">
                   {row.id && (
                     <button
                       type="button"
                       onClick={() => removeRow(row.id)}
                       title="Remove this diagnosis"
-                      className="rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      className="mt-1.5 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     >
                       <X className="h-3 w-3" />
                       <span className="sr-only">Remove diagnosis</span>
