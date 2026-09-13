@@ -2,22 +2,16 @@
 
 /**
  * Shared EPR chrome: brand, the three top-level tabs (patients,
- * consultations, stimulated recall), and the settings entry point. Owns the settings dialog and its
- * microphone/device plumbing so every page (register, chart, consultations
- * table, consultation workspace) gets settings — including BYOK key entry —
- * without re-wiring audio state.
+ * consultations, stimulated recall) and the settings page link. Being on
+ * every page, it also runs the once-per-load audit log housekeeping.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { AudioLines, ClipboardList, MessageSquareQuote, Settings, Users, type LucideIcon } from "lucide-react"
-import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
-import { SettingsDialog } from "@ui"
-import { warmupMicrophonePermission } from "@audio"
-import { getPreferences, setPreferences, debugWarn, initializeAuditLog } from "@storage"
-import type { EncounterMode } from "@storage/types"
+import { initializeAuditLog } from "@storage"
 
 /**
  * Which tab a route belongs to. The chart sits under Patients, the workspace
@@ -42,146 +36,56 @@ function navTabs(pathname: string): Array<{ href: string; label: string; icon: L
   ]
 }
 
+const TAB =
+  "inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition-colors hover:bg-accent hover:text-foreground"
+
 export function TopBar() {
   const pathname = usePathname() ?? "/"
-  const [showSettings, setShowSettings] = useState(false)
-  const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
-  const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
-  const [defaultMode, setDefaultMode] = useState<EncounterMode>("scribed")
-  // undefined = the committed default vocabulary is in use.
-  const [keytermsOverride, setKeytermsOverride] = useState<string[] | undefined>(undefined)
-  const [micPermissionStatus, setMicPermissionStatus] = useState("unknown")
-  const [micReadinessMessage, setMicReadinessMessage] = useState("")
-  const [lastFailureCode, setLastFailureCode] = useState("")
 
   useEffect(() => {
-    const prefs = getPreferences()
-    setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
-    setDefaultMode(prefs.encounterMode || "scribed")
-    setKeytermsOverride(prefs.keytermsOverride)
     // The top bar is on every page, so this runs once per page load:
     // cleans up expired audit entries and schedules periodic cleanup.
     void initializeAuditLog()
   }, [])
 
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return
-    const refreshAudioDevices = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        setAudioInputDevices(
-          devices
-            .filter((device) => device.kind === "audioinput")
-            .map((device, index) => ({ id: device.deviceId, label: device.label || `Microphone ${index + 1}` })),
-        )
-      } catch (error) {
-        debugWarn("Failed to enumerate audio input devices", error)
-      }
-    }
-    void refreshAudioDevices()
-    navigator.mediaDevices.addEventListener?.("devicechange", refreshAudioDevices)
-    return () => navigator.mediaDevices.removeEventListener?.("devicechange", refreshAudioDevices)
-  }, [])
-
-  const refreshMicPermissionStatus = useCallback(async () => {
-    try {
-      if (typeof navigator !== "undefined" && navigator.permissions?.query) {
-        const status = await navigator.permissions.query({ name: "microphone" as PermissionName })
-        setMicPermissionStatus(status.state)
-        return
-      }
-    } catch {
-      // Permissions API not supported for "microphone" in this browser.
-    }
-    setMicPermissionStatus("unknown")
-  }, [])
-
-  const handleRunMicrophoneCheck = useCallback(async () => {
-    await refreshMicPermissionStatus()
-    const warmed = await warmupMicrophonePermission()
-    if (warmed) {
-      setMicReadinessMessage("Ready")
-      setLastFailureCode("")
-    } else {
-      setMicReadinessMessage("Unable to access microphone. Check permission and selected input device.")
-      setLastFailureCode("MIC_STREAM_UNAVAILABLE")
-    }
-  }, [refreshMicPermissionStatus])
-
-  const handlePreferredInputDeviceChange = useCallback((value: string) => {
-    setPreferredInputDeviceId(value)
-    void setPreferences({ preferredInputDeviceId: value })
-  }, [])
-
-  const handleDefaultModeChange = useCallback((value: EncounterMode) => {
-    setDefaultMode(value)
-    void setPreferences({ encounterMode: value })
-  }, [])
-
-  const handleKeytermsOverrideChange = useCallback((terms: string[] | undefined) => {
-    setKeytermsOverride(terms)
-    // undefined clears the stored key, so the committed default applies again.
-    void setPreferences({ keytermsOverride: terms })
-  }, [])
+  const settingsActive = pathname.startsWith("/settings")
 
   return (
-    <>
-      <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-card/70 backdrop-blur-sm">
-        <div className="mx-auto flex h-14 w-full items-center justify-between gap-4 px-6">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
-                <AudioLines className="h-4 w-4" />
-              </span>
-              <span className="font-display text-lg font-medium tracking-tight text-foreground">DiSCaScribe</span>
-            </Link>
-            <nav className="flex items-center gap-1 text-sm">
-              {navTabs(pathname).map((tab) => {
-                const Icon = tab.icon
-                return (
-                  <Link
-                    key={tab.href}
-                    href={tab.href}
-                    aria-current={tab.active ? "page" : undefined}
-                    className={cn(
-                      "inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition-colors hover:bg-accent hover:text-foreground",
-                      tab.active ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {tab.label}
-                  </Link>
-                )
-              })}
-            </nav>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowSettings(true)}
-            className="group h-8 gap-2 rounded-md px-3 text-muted-foreground hover:text-foreground"
-          >
-            <Settings className="h-4 w-4 transition-transform duration-500 group-hover:rotate-45" />
-            <span className="text-xs">Settings</span>
-          </Button>
+    <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-card/70 backdrop-blur-sm">
+      <div className="mx-auto flex h-14 w-full items-center justify-between gap-4 px-6">
+        <div className="flex items-center gap-6">
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
+              <AudioLines className="h-4 w-4" />
+            </span>
+            <span className="font-display text-lg font-medium tracking-tight text-foreground">DiSCaScribe</span>
+          </Link>
+          <nav className="flex items-center gap-1 text-sm">
+            {navTabs(pathname).map((tab) => {
+              const Icon = tab.icon
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={tab.active ? "page" : undefined}
+                  className={cn(TAB, tab.active ? "bg-accent font-medium text-foreground" : "text-muted-foreground")}
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                </Link>
+              )
+            })}
+          </nav>
         </div>
-      </header>
-      <SettingsDialog
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        audioInputDevices={audioInputDevices}
-        preferredInputDeviceId={preferredInputDeviceId}
-        onPreferredInputDeviceChange={handlePreferredInputDeviceChange}
-        encounterMode={defaultMode}
-        onEncounterModeChange={handleDefaultModeChange}
-        keytermsOverride={keytermsOverride}
-        onKeytermsOverrideChange={handleKeytermsOverrideChange}
-        micPermissionStatus={micPermissionStatus}
-        lastMicReadinessMessage={micReadinessMessage}
-        lastMicReadinessMetrics={null}
-        lastFailureCode={lastFailureCode}
-        onRunMicrophoneCheck={handleRunMicrophoneCheck}
-      />
-    </>
+        <Link
+          href="/settings"
+          aria-current={settingsActive ? "page" : undefined}
+          className={cn(TAB, "text-sm", settingsActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground")}
+        >
+          <Settings className="h-4 w-4" />
+          Settings
+        </Link>
+      </div>
+    </header>
   )
 }

@@ -276,7 +276,7 @@ Reusable React components (edit frequently)
 - `encounter-list.tsx` - Encounter history list
 - `recording-view.tsx` - Recording interface
 - `processing-view.tsx` - Processing status display
-- `settings-dialog.tsx` - Settings modal
+- `settings-panel.tsx` - Settings page body (cards for microphone, capture mode, vocabulary, keys, audit logs)
 - `new-encounter-form.tsx` - New encounter form
 - `permissions-dialog.tsx` - Permission requests
 - `error-boundary.tsx` - Error handling
