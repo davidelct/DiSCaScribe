@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Plus, X } from "lucide-react"
+import { useEffect, useState, type FormEvent } from "react"
+import { X } from "lucide-react"
+import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
 import {
   LIKELIHOOD_RANGE,
@@ -9,28 +10,23 @@ import {
   type FinalDiagnosisRow,
   type RecallEntry,
   type RecallHypothesis,
-  type RecallRating,
 } from "./recall-session"
 
 /**
- * One stop of the recall interview as a card: the turns it is about, then
- * the template's table — Why, Reason for asking a question, Hypothesis,
- * Likelihood, Information support — one row per hypothesis, and Notes.
- * Only the active card takes input; the others read as text so the column
- * stays quiet.
+ * One stop of the recall interview as a card: the turns it is about, the
+ * template's table as a summary of the rows so far, and a form below it
+ * that adds a row. Clicking a row loads it into the form to change it.
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
 const LABEL = "text-xs text-muted-foreground"
-const TEXT_INPUT =
-  "w-full rounded-md border border-input bg-card px-2 py-1.5 text-[13px] leading-[18px] text-foreground " +
+const BOX =
+  "w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-[13px] leading-[18px] text-foreground " +
   "placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
-/** A table cell that reads as text until it is hovered or focused. */
-const CELL_INPUT =
-  "w-full rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[13px] leading-[18px] text-foreground " +
-  "placeholder:text-muted-foreground/70 hover:border-input focus-visible:border-primary focus-visible:outline-none"
+const NUMBER_BOX =
+  BOX + " h-8 w-16 px-1 text-center font-mono font-semibold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
 const TH = "pb-1.5 pr-3 text-left align-bottom text-xs font-medium text-muted-foreground"
-const TD = "py-1 pr-3 align-top text-[13px] leading-[18px] text-foreground"
+const TD = "py-1.5 pr-3 align-top text-[13px] leading-[18px] text-foreground"
 
 function formatSupport(value: number): string {
   return value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : "0"
@@ -40,106 +36,20 @@ function supportClass(value: number): string {
   return value > 0 ? "text-success" : value < 0 ? "text-amber-700" : "text-muted-foreground"
 }
 
-/** A one-line textarea that grows with its text, so a short answer stays short. */
-function AutoTextarea({
-  value,
-  onChange,
-  placeholder,
-  label,
-  className,
-}: {
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  label: string
-  className?: string
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
-    const element = ref.current
-    if (!element) return
-    element.style.height = "0px"
-    element.style.height = `${element.scrollHeight + 2}px`
-  }, [value])
-  return (
-    <textarea
-      ref={ref}
-      rows={1}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      aria-label={label}
-      className={cn(className ?? TEXT_INPUT, "resize-none")}
-    />
-  )
+/** Parse a scale box: empty is null, anything else is clamped to the range. */
+function parseScale(raw: string, min: number, max: number): number | null {
+  if (raw.trim() === "") return null
+  const parsed = Math.round(Number(raw))
+  if (!Number.isFinite(parsed)) return null
+  return Math.min(max, Math.max(min, parsed))
 }
 
-/**
- * An integer field for the scales. A null value with a carried-over number
- * shows that number as a dashed placeholder: the table inherited it, the
- * clinician has not re-rated it here.
- */
-function NumberField({
-  value,
-  carried = null,
-  min,
-  max,
-  onChange,
-  label,
-}: {
-  value: number | null
-  carried?: number | null
-  min: number
-  max: number
-  onChange: (value: number | null) => void
-  label: string
-}) {
-  const [draft, setDraft] = useState(value === null ? "" : String(value))
-  useEffect(() => {
-    setDraft(value === null ? "" : String(value))
-  }, [value])
-  const inherited = value === null && carried !== null
+function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={min}
-      max={max}
-      step={1}
-      value={draft}
-      placeholder={carried === null ? "" : String(carried)}
-      aria-label={label}
-      onChange={(event) => {
-        const next = event.target.value
-        setDraft(next)
-        if (next.trim() === "") {
-          onChange(null)
-          return
-        }
-        const parsed = Number(next)
-        if (Number.isInteger(parsed) && parsed >= min && parsed <= max) onChange(parsed)
-      }}
-      onBlur={() => {
-        if (draft.trim() === "") return
-        const parsed = Math.round(Number(draft))
-        if (!Number.isFinite(parsed)) {
-          setDraft(value === null ? "" : String(value))
-          return
-        }
-        const clamped = Math.min(max, Math.max(min, parsed))
-        setDraft(String(clamped))
-        if (clamped !== value) onChange(clamped)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur()
-      }}
-      className={cn(
-        "h-[30px] w-12 rounded-md border bg-card text-center font-mono text-[13px] font-semibold text-foreground",
-        "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25",
-        "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-        inherited ? "border-dashed border-input placeholder:text-muted-foreground" : "border-input",
-      )}
-    />
+    <label className={cn("flex flex-col gap-1", className)}>
+      <span className={LABEL}>{label}</span>
+      {children}
+    </label>
   )
 }
 
@@ -160,62 +70,93 @@ export interface EntryRow {
   support: number | null
 }
 
+/** What the form submits. */
+export interface EntryRowInput {
+  name: string
+  why: string
+  reason: string
+  likelihood: number | null
+  support: number | null
+}
+
 interface RecallEntryCardProps {
   number: number
   entry: RecallEntry
   excerpt: EntryExcerptLine[]
   rows: EntryRow[]
-  active: boolean
-  onActivate: () => void
+  /** The entry whose turns are ticked in the transcript. */
+  open: boolean
+  onOpen: () => void
   onChange: (patch: Partial<Pick<RecallEntry, "notes">>) => void
-  onRate: (hypothesisId: string, patch: Partial<RecallRating>) => void
-  onAddHypothesis: (name: string) => void
+  onAddRow: (row: EntryRowInput) => void
+  onSaveRow: (hypothesisId: string, row: EntryRowInput) => void
   onRemoveHypothesis: (hypothesisId: string) => void
   onRemove: () => void
   cardRef: (element: HTMLElement | null) => void
 }
+
+const EMPTY_FORM = { why: "", reason: "", name: "", likelihood: "", support: "" }
 
 export function RecallEntryCard({
   number,
   entry,
   excerpt,
   rows,
-  active,
-  onActivate,
+  open,
+  onOpen,
   onChange,
-  onRate,
-  onAddHypothesis,
+  onAddRow,
+  onSaveRow,
   onRemoveHypothesis,
   onRemove,
   cardRef,
 }: RecallEntryCardProps) {
-  const [newHypothesis, setNewHypothesis] = useState("")
+  // Removal asks once, inline: a browser confirm() is blocked in some
+  // embedded views and would leave the X doing nothing.
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) setConfirmingRemove(false)
+  }, [open])
 
-  const submitHypothesis = () => {
-    const name = newHypothesis.trim()
-    if (!name) return
-    onAddHypothesis(name)
-    setNewHypothesis("")
+  const editRow = (row: EntryRow) => {
+    setEditingId(row.hypothesis.id)
+    setForm({
+      why: row.why,
+      reason: row.reason,
+      name: row.hypothesis.name,
+      likelihood: row.likelihood !== null ? String(row.likelihood) : row.carried !== null ? String(row.carried) : "",
+      support: row.support !== null ? String(row.support) : "",
+    })
   }
 
-  const textCell = (row: EntryRow, key: "why" | "reason", label: string, placeholder: string) =>
-    active ? (
-      <AutoTextarea
-        value={row[key]}
-        onChange={(value) => onRate(row.hypothesis.id, { [key]: value })}
-        placeholder={placeholder}
-        label={`${label} for ${row.hypothesis.name}`}
-        className={CELL_INPUT}
-      />
-    ) : (
-      <span className="block px-1.5 py-1">{row[key]}</span>
-    )
+  const resetForm = () => {
+    setEditingId(null)
+    setForm(EMPTY_FORM)
+  }
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    const name = form.name.trim()
+    if (!name) return
+    const row: EntryRowInput = {
+      name,
+      why: form.why.trim(),
+      reason: form.reason.trim(),
+      likelihood: parseScale(form.likelihood, LIKELIHOOD_RANGE.min, LIKELIHOOD_RANGE.max),
+      support: parseScale(form.support, SUPPORT_RANGE.min, SUPPORT_RANGE.max),
+    }
+    if (editingId) onSaveRow(editingId, row)
+    else onAddRow(row)
+    resetForm()
+  }
 
   return (
     <article
       ref={cardRef}
-      onClick={active ? undefined : onActivate}
-      className={cn(CARD, "shrink-0 transition-colors", active ? "border-primary" : "cursor-pointer border-border hover:border-input")}
+      onClick={open ? undefined : onOpen}
+      className={cn(CARD, "shrink-0 transition-colors", open ? "border-primary" : "cursor-pointer border-border hover:border-input")}
     >
       <header className="flex items-start gap-2.5 px-4 pb-2.5 pt-3">
         <span className="mt-px inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">
@@ -228,10 +169,29 @@ export function RecallEntryCard({
             </p>
           ))}
         </div>
-        {active && (
+        {open && confirmingRemove && (
+          <span className="-mt-0.5 flex shrink-0 items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Remove this entry?</span>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded-md bg-destructive px-2 py-1 font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(false)}
+              className="rounded-md px-2 py-1 font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              Keep
+            </button>
+          </span>
+        )}
+        {open && !confirmingRemove && (
           <button
             type="button"
-            onClick={onRemove}
+            onClick={() => setConfirmingRemove(true)}
             title="Remove this entry"
             className="-mr-1 -mt-0.5 shrink-0 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           >
@@ -240,116 +200,137 @@ export function RecallEntryCard({
           </button>
         )}
       </header>
-      <div className="flex flex-col gap-3 border-t border-border px-4 pb-4 pt-3">
-        {/* The template's table, one row per hypothesis. */}
+
+      <div className="flex flex-col gap-4 border-t border-border px-4 pb-4 pt-3">
+        {/* The template's table: a summary of the rows so far. */}
         <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={cn(TH, "w-[25%] pl-1.5")}>Why</th>
-              <th className={cn(TH, "w-[28%] pl-1.5")}>Reason for asking</th>
-              <th className={cn(TH, "pl-1.5")}>Hypothesis</th>
-              <th className={cn(TH, "w-[80px] px-1 text-center")}>Likelihood</th>
-              <th className={cn(TH, "w-[72px] pr-0 text-center")}>Support</th>
+              <th className={cn(TH, "w-[25%]")}>Why</th>
+              <th className={cn(TH, "w-[28%]")}>Reason for asking</th>
+              <th className={TH}>Hypothesis</th>
+              <th className={cn(TH, "w-[76px] text-center")}>Likelihood</th>
+              <th className={cn(TH, "w-[64px] pr-0 text-center")}>Support</th>
+              {open && <th className="w-6" />}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.hypothesis.id} className="group border-b border-border/60 last:border-b-0">
-                <td className={TD}>{textCell(row, "why", "Why", "Why did you ask that?")}</td>
-                <td className={TD}>{textCell(row, "reason", "Reason", "What were you thinking?")}</td>
-                <td className={cn(TD, "text-sm")}>
-                  <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 py-1">
-                    {row.hypothesis.name}
-                    {active && (
-                      <button
-                        type="button"
-                        onClick={() => onRemoveHypothesis(row.hypothesis.id)}
-                        title={`Remove ${row.hypothesis.name} from every table`}
-                        className="rounded-full p-0.5 text-muted-foreground/0 transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:text-muted-foreground/60 focus-visible:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                      >
-                        <X className="h-3 w-3" />
-                        <span className="sr-only">Remove {row.hypothesis.name}</span>
-                      </button>
-                    )}
-                  </span>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={open ? 6 : 5} className="py-2 text-xs text-muted-foreground">
+                  No rows yet.
                 </td>
-                <td className={cn(TD, "px-1 text-center")}>
-                  {active ? (
-                    <span className="inline-flex flex-col items-center gap-0.5">
-                      <NumberField
-                        value={row.likelihood}
-                        carried={row.carried}
-                        min={LIKELIHOOD_RANGE.min}
-                        max={LIKELIHOOD_RANGE.max}
-                        onChange={(likelihood) => onRate(row.hypothesis.id, { likelihood })}
-                        label={`Likelihood of ${row.hypothesis.name}`}
-                      />
-                      {row.likelihood !== null && row.carried !== null && row.likelihood !== row.carried && (
-                        <span className="font-mono text-[10px] text-muted-foreground">was {row.carried}</span>
-                      )}
-                    </span>
-                  ) : row.likelihood !== null ? (
-                    <span className="inline-block py-1 font-mono text-[13px] font-semibold">{row.likelihood}</span>
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr
+                key={row.hypothesis.id}
+                onClick={open ? () => editRow(row) : undefined}
+                title={open ? "Click to change this row" : undefined}
+                className={cn(
+                  "border-b border-border/60 last:border-b-0",
+                  open && "cursor-pointer hover:bg-accent/60",
+                  editingId === row.hypothesis.id && "bg-brand-soft/50",
+                )}
+              >
+                <td className={TD}>{row.why}</td>
+                <td className={TD}>{row.reason}</td>
+                <td className={cn(TD, "text-sm")}>{row.hypothesis.name}</td>
+                <td className={cn(TD, "text-center font-mono font-semibold")}>
+                  {row.likelihood !== null ? (
+                    row.likelihood
                   ) : row.carried !== null ? (
-                    <span className="inline-block py-1 font-mono text-[13px] font-semibold text-muted-foreground" title="Carried over from the previous table">
+                    <span className="text-muted-foreground" title="Carried over from the previous table">
                       {row.carried}
                     </span>
                   ) : null}
                 </td>
-                <td className={cn(TD, "pr-0 text-center")}>
-                  {active ? (
-                    <NumberField
-                      value={row.support}
-                      min={SUPPORT_RANGE.min}
-                      max={SUPPORT_RANGE.max}
-                      onChange={(support) => onRate(row.hypothesis.id, { support })}
-                      label={`Support for ${row.hypothesis.name}`}
-                    />
-                  ) : row.support !== null ? (
-                    <span className={cn("inline-block py-1 font-mono text-[13px] font-semibold", supportClass(row.support))}>{formatSupport(row.support)}</span>
-                  ) : null}
+                <td className={cn(TD, "pr-0 text-center font-mono font-semibold", row.support !== null && supportClass(row.support))}>
+                  {row.support !== null ? formatSupport(row.support) : null}
                 </td>
+                {open && (
+                  <td className="py-1 pl-1 text-right align-top">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (editingId === row.hypothesis.id) resetForm()
+                        onRemoveHypothesis(row.hypothesis.id)
+                      }}
+                      title={`Remove ${row.hypothesis.name} from every table`}
+                      className="rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    >
+                      <X className="h-3 w-3" />
+                      <span className="sr-only">Remove {row.hypothesis.name}</span>
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
 
-        {active && (
-          <div className="flex gap-2">
-            <input
-              value={newHypothesis}
-              onChange={(event) => setNewHypothesis(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  submitHypothesis()
-                }
-              }}
-              placeholder="Add a hypothesis"
-              aria-label="New hypothesis"
-              className={cn(TEXT_INPUT, "min-w-0 flex-1 border-dashed")}
-            />
-            <button
-              type="button"
-              onClick={submitHypothesis}
-              disabled={!newHypothesis.trim()}
-              aria-label="Add hypothesis"
-              className="inline-flex h-[34px] w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground transition-colors hover:bg-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
+        {/* The form: how a row is added, or changed once clicked. */}
+        {open && (
+          <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-lg border border-border bg-background p-3">
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <Field label="Why did you ask that?">
+                <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
+              </Field>
+              <Field label="Reason for asking: what were you thinking?">
+                <textarea rows={2} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={cn(BOX, "resize-none")} />
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-end gap-2.5">
+              <Field label="Hypothesis" className="min-w-[200px] flex-1">
+                <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={BOX} />
+              </Field>
+              <Field label="Likelihood 0–10">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={LIKELIHOOD_RANGE.min}
+                  max={LIKELIHOOD_RANGE.max}
+                  step={1}
+                  value={form.likelihood}
+                  onChange={(event) => setForm({ ...form, likelihood: event.target.value })}
+                  className={NUMBER_BOX}
+                />
+              </Field>
+              <Field label="Support −10 to +10">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={SUPPORT_RANGE.min}
+                  max={SUPPORT_RANGE.max}
+                  step={1}
+                  value={form.support}
+                  onChange={(event) => setForm({ ...form, support: event.target.value })}
+                  className={NUMBER_BOX}
+                />
+              </Field>
+              <div className="flex items-center gap-2">
+                <Button type="submit" size="sm" disabled={!form.name.trim()} className="h-8 rounded-md px-3">
+                  {editingId ? "Save row" : "Add row"}
+                </Button>
+                {editingId && (
+                  <Button type="button" variant="ghost" size="sm" onClick={resetForm} className="h-8 rounded-md px-2">
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+          </form>
         )}
 
-        {(active || entry.notes) && (
-          <div className="flex flex-col gap-0.5">
-            <span className={cn(LABEL, "px-1.5")}>Notes</span>
-            {active ? (
-              <AutoTextarea value={entry.notes} onChange={(notes) => onChange({ notes })} placeholder="Optional" label="Notes" className={CELL_INPUT} />
+        {(open || entry.notes) && (
+          <Field label="Notes">
+            {open ? (
+              <textarea rows={2} value={entry.notes} onChange={(event) => onChange({ notes: event.target.value })} className={cn(BOX, "resize-none")} />
             ) : (
-              <p className="px-1.5 text-[13px] leading-[18px] text-foreground">{entry.notes}</p>
+              <p className="text-[13px] leading-[18px] text-foreground">{entry.notes}</p>
             )}
-          </div>
+          </Field>
         )}
       </div>
     </article>
@@ -362,88 +343,140 @@ interface FinalDiagnosisCardProps {
   cardRef?: (element: HTMLElement | null) => void
 }
 
+const EMPTY_DIAGNOSIS = { diagnosis: "", likelihood: "", why: "", difficulty: "" }
+
 /**
  * The closing table: the diagnoses the clinician settled on, how likely,
- * why, and how difficult the case was. Always editable; a blank row waits
- * at the bottom and becomes real as soon as something is typed into it.
+ * why, and how difficult the case was. Same shape as the entries: the table
+ * is the summary, the form below adds a row, clicking a row changes it.
  */
 export function FinalDiagnosisCard({ rows, onChange, cardRef }: FinalDiagnosisCardProps) {
-  const blank: FinalDiagnosisRow = { id: "", diagnosis: "", likelihood: null, why: "", difficulty: "" }
-  const patchRow = (row: FinalDiagnosisRow, patch: Partial<FinalDiagnosisRow>) => {
-    if (row.id === "") {
-      onChange([...rows, { ...blank, ...patch, id: crypto.randomUUID() }])
-      return
-    }
-    onChange(rows.map((current) => (current.id === row.id ? { ...current, ...patch } : current)))
+  const [form, setForm] = useState(EMPTY_DIAGNOSIS)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const resetForm = () => {
+    setEditingId(null)
+    setForm(EMPTY_DIAGNOSIS)
   }
-  const removeRow = (id: string) => onChange(rows.filter((row) => row.id !== id))
+  const editRow = (row: FinalDiagnosisRow) => {
+    setEditingId(row.id)
+    setForm({
+      diagnosis: row.diagnosis,
+      likelihood: row.likelihood !== null ? String(row.likelihood) : "",
+      why: row.why,
+      difficulty: row.difficulty,
+    })
+  }
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    const diagnosis = form.diagnosis.trim()
+    if (!diagnosis) return
+    const values = {
+      diagnosis,
+      likelihood: parseScale(form.likelihood, LIKELIHOOD_RANGE.min, LIKELIHOOD_RANGE.max),
+      why: form.why.trim(),
+      difficulty: form.difficulty.trim(),
+    }
+    if (editingId) onChange(rows.map((row) => (row.id === editingId ? { ...row, ...values } : row)))
+    else onChange([...rows, { id: crypto.randomUUID(), ...values }])
+    resetForm()
+  }
+  const removeRow = (id: string) => {
+    if (editingId === id) resetForm()
+    onChange(rows.filter((row) => row.id !== id))
+  }
 
   return (
     <section ref={cardRef} className={cn(CARD, "shrink-0 border-border")}>
       <div className="flex min-h-8 items-center px-5 py-3">
         <h3 className="text-sm font-semibold text-foreground">Final diagnosis</h3>
       </div>
-      <div className="border-t border-border px-5 pb-4 pt-3">
+      <div className="flex flex-col gap-4 border-t border-border px-5 pb-4 pt-3">
         <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={cn(TH, "w-[30%] pl-1.5")}>Diagnosis</th>
-              <th className={cn(TH, "w-[80px] px-1 text-center")}>Likelihood</th>
-              <th className={cn(TH, "pl-1.5")}>Why</th>
-              <th className={cn(TH, "w-[26%] pl-1.5")}>How difficult was the case?</th>
+              <th className={cn(TH, "w-[30%]")}>Diagnosis</th>
+              <th className={cn(TH, "w-[76px] text-center")}>Likelihood</th>
+              <th className={TH}>Why</th>
+              <th className={cn(TH, "w-[26%]")}>How difficult was the case?</th>
               <th className="w-6" />
             </tr>
           </thead>
           <tbody>
-            {[...rows, blank].map((row) => (
-              <tr key={row.id || "blank"} className="border-b border-border/60 last:border-b-0">
-                <td className="py-1 pr-3 align-top">
-                  <AutoTextarea
-                    value={row.diagnosis}
-                    onChange={(diagnosis) => patchRow(row, { diagnosis })}
-                    placeholder={row.id ? "" : "Add a diagnosis"}
-                    label="Diagnosis"
-                    className={CELL_INPUT}
-                  />
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="py-2 text-xs text-muted-foreground">
+                  No rows yet.
                 </td>
-                <td className="py-1 px-1 text-center align-top">
-                  <NumberField
-                    value={row.likelihood}
-                    min={LIKELIHOOD_RANGE.min}
-                    max={LIKELIHOOD_RANGE.max}
-                    onChange={(likelihood) => patchRow(row, { likelihood })}
-                    label="Likelihood of the diagnosis"
-                  />
-                </td>
-                <td className="py-1 pr-3 align-top">
-                  <AutoTextarea value={row.why} onChange={(why) => patchRow(row, { why })} placeholder="" label="Why" className={CELL_INPUT} />
-                </td>
-                <td className="py-1 align-top">
-                  <AutoTextarea
-                    value={row.difficulty}
-                    onChange={(difficulty) => patchRow(row, { difficulty })}
-                    placeholder=""
-                    label="How difficult was the case?"
-                    className={CELL_INPUT}
-                  />
-                </td>
-                <td className="py-1 pl-1.5 text-right align-top">
-                  {row.id && (
-                    <button
-                      type="button"
-                      onClick={() => removeRow(row.id)}
-                      title="Remove this diagnosis"
-                      className="mt-1.5 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      <X className="h-3 w-3" />
-                      <span className="sr-only">Remove diagnosis</span>
-                    </button>
-                  )}
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                onClick={() => editRow(row)}
+                title="Click to change this row"
+                className={cn("cursor-pointer border-b border-border/60 last:border-b-0 hover:bg-accent/60", editingId === row.id && "bg-brand-soft/50")}
+              >
+                <td className={cn(TD, "text-sm")}>{row.diagnosis}</td>
+                <td className={cn(TD, "text-center font-mono font-semibold")}>{row.likelihood ?? null}</td>
+                <td className={TD}>{row.why}</td>
+                <td className={TD}>{row.difficulty}</td>
+                <td className="py-1 pl-1 text-right align-top">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeRow(row.id)
+                    }}
+                    title="Remove this diagnosis"
+                    className="rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  >
+                    <X className="h-3 w-3" />
+                    <span className="sr-only">Remove diagnosis</span>
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+
+        <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-lg border border-border bg-background p-3">
+          <div className="flex flex-wrap items-end gap-2.5">
+            <Field label="Diagnosis" className="min-w-[200px] flex-1">
+              <input value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} className={BOX} />
+            </Field>
+            <Field label="Likelihood 0–10">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={LIKELIHOOD_RANGE.min}
+                max={LIKELIHOOD_RANGE.max}
+                step={1}
+                value={form.likelihood}
+                onChange={(event) => setForm({ ...form, likelihood: event.target.value })}
+                className={NUMBER_BOX}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <Field label="Why">
+              <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
+            </Field>
+            <Field label="How difficult was the case?">
+              <textarea rows={2} value={form.difficulty} onChange={(event) => setForm({ ...form, difficulty: event.target.value })} className={cn(BOX, "resize-none")} />
+            </Field>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" disabled={!form.diagnosis.trim()} className="h-8 rounded-md px-3">
+              {editingId ? "Save row" : "Add row"}
+            </Button>
+            {editingId && (
+              <Button type="button" variant="ghost" size="sm" onClick={resetForm} className="h-8 rounded-md px-2">
+                Cancel
+              </Button>
+            )}
+          </div>
+        </form>
       </div>
     </section>
   )

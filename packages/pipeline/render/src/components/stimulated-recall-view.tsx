@@ -10,9 +10,8 @@ import { guessClinicianSpeaker, heuristicRecallExchanges } from "@pipeline-error
 import { Check, Download, Loader2, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
 import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
-import { FinalDiagnosisCard, RecallEntryCard, type EntryRow } from "./recall-entry"
+import { FinalDiagnosisCard, RecallEntryCard, type EntryRow, type EntryRowInput } from "./recall-entry"
 import {
-  EMPTY_RATING,
   buildRecallPayload,
   carriedLikelihood,
   emptyRecallSession,
@@ -23,7 +22,6 @@ import {
   saveRecallSession,
   toUtterances,
   type RecallEntry,
-  type RecallRating,
   type RecallSession,
 } from "./recall-session"
 
@@ -168,7 +166,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   const [recallStatus, setRecallStatus] = useState<RecallRecordingStatus>("idle")
   const [hasRecallAudio, setHasRecallAudio] = useState(false)
   const [recallAudioVersion, setRecallAudioVersion] = useState(0)
-  const turnRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const turnRefs = useRef<Array<HTMLElement | null>>([])
   const entryRefs = useRef(new Map<string, HTMLElement>())
   const recallBlobRef = useRef<Blob | null>(null)
 
@@ -231,7 +229,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     () =>
       ordered.map((entry, position) => {
         const rows: EntryRow[] = hypothesesAt(session, ordered, position).map((hypothesis) => {
-          const rating = entry.ratings[hypothesis.id] ?? EMPTY_RATING
+          const rating = entry.ratings[hypothesis.id] ?? { why: "", reason: "", likelihood: null, support: null }
           return {
             hypothesis,
             why: rating.why,
@@ -258,6 +256,8 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     for (const entry of session.entries) for (const index of entry.turns) map.set(index, entry)
     return map
   }, [session.entries])
+  const openEntry = activeId ? session.entries.find((entry) => entry.id === activeId) ?? null : null
+  const checkedTurns = openEntry ? openEntry.turns : selected
   const transcriptEntries = useMemo(
     () => entryViews.map((view) => ({ id: view.entry.id, number: view.number, turns: view.entry.turns })),
     [entryViews],
@@ -265,6 +265,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
 
   // ── Selection and entries ──────────────────────────────────────────────────
   const activateEntry = (id: string, scrollTranscript: boolean) => {
+    setSelected([])
     setActiveId(id)
     requestAnimationFrame(() => entryRefs.current.get(id)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
     if (scrollTranscript) {
@@ -273,38 +274,49 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     }
   }
 
-  const onTurnClick = (index: number) => {
-    // While the recall interview is being recorded, log the click against the
-    // recording's timeline so the audio can later be segmented per turn.
-    if (recallStatus === "recording") {
-      const click = { utterance: index, audioOffsetSeconds: recordedOffsetSeconds(), at: new Date().toISOString() }
-      update((current) =>
-        current.timeline
-          ? { ...current, timeline: { ...current.timeline, utteranceClicks: [...current.timeline.utteranceClicks, click] } }
-          : current,
-      )
-    }
-    // A turn that already has a table opens that table; clicking it again
-    // closes it, so the highlight never gets stuck.
-    const owner = entryByTurn.get(index)
-    if (owner) {
-      if (owner.id === activeId) setActiveId(null)
-      else activateEntry(owner.id, false)
+  // While the recall interview is being recorded, every turn click is logged
+  // against the recording's timeline so the audio can later be segmented.
+  const logTurnClick = (index: number) => {
+    if (recallStatus !== "recording") return
+    const click = { utterance: index, audioOffsetSeconds: recordedOffsetSeconds(), at: new Date().toISOString() }
+    update((current) =>
+      current.timeline
+        ? { ...current, timeline: { ...current.timeline, utteranceClicks: [...current.timeline.utteranceClicks, click] } }
+        : current,
+    )
+  }
+
+  // Ticking a turn in a question–answer exchange ticks the whole exchange;
+  // unticking takes off just that box. With an entry open, the boxes are
+  // that entry's turns and ticking edits them; otherwise they are the pick
+  // for a new entry.
+  const toggleTurn = (index: number, checked: boolean) => {
+    logTurnClick(index)
+    const exchange = exchanges.find((candidate) => index >= candidate.question && index <= candidate.answer_end)
+    const group = exchange
+      ? Array.from({ length: exchange.answer_end - exchange.question + 1 }, (_, k) => exchange.question + k)
+      : [index]
+    if (openEntry) {
+      const others = new Set([...entryByTurn.entries()].filter(([, entry]) => entry.id !== openEntry.id).map(([i]) => i))
+      const turns = checked
+        ? [...new Set([...openEntry.turns, ...group.filter((i) => !others.has(i))])].sort((a, b) => a - b)
+        : openEntry.turns.filter((i) => i !== index)
+      if (turns.length === 0) return // an entry keeps at least one turn; remove the entry instead
+      patchEntry(openEntry.id, { turns })
       return
     }
     setSelected((current) => {
-      if (current.includes(index)) return current.filter((i) => i !== index)
-      // A turn in a question–answer exchange brings the whole exchange along,
-      // unless part of it is already picked: then only this turn is added.
-      const exchange = exchanges.find((candidate) => index >= candidate.question && index <= candidate.answer_end)
-      const group = exchange
-        ? Array.from({ length: exchange.answer_end - exchange.question + 1 }, (_, k) => exchange.question + k).filter(
-            (i) => !entryByTurn.has(i),
-          )
-        : [index]
-      const additions = group.some((i) => current.includes(i)) ? [index] : group
+      if (!checked) return current.filter((i) => i !== index)
+      const additions = group.filter((i) => !entryByTurn.has(i))
       return [...new Set([...current, ...additions])].sort((a, b) => a - b)
     })
+  }
+
+  // A turn of another entry opens that entry.
+  const openEntryFromTurn = (id: string) => {
+    const first = sessionRef.current.entries.find((entry) => entry.id === id)?.turns[0]
+    if (first !== undefined) logTurnClick(first)
+    activateEntry(id, false)
   }
 
   const clearSelection = () => setSelected([])
@@ -340,7 +352,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   }
 
   const removeEntry = (id: string) => {
-    if (!window.confirm("Remove this entry and its ratings?")) return
     update((current) => {
       const entries = current.entries.filter((entry) => entry.id !== id)
       // A hypothesis first reported here moves to the earliest remaining
@@ -360,20 +371,41 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       entries: current.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
     }))
 
-  const rate = (entryId: string, hypothesisId: string, patch: Partial<RecallRating>) =>
-    update((current) => ({
-      ...current,
-      entries: current.entries.map((entry) => {
-        if (entry.id !== entryId) return entry
-        const existing: RecallRating = entry.ratings[hypothesisId] ?? EMPTY_RATING
-        return { ...entry, ratings: { ...entry.ratings, [hypothesisId]: { ...existing, ...patch } } }
-      }),
-    }))
+  // A row from the form: a new hypothesis, first reported at this entry,
+  // with its ratings here.
+  const addRow = (entryId: string, row: EntryRowInput) =>
+    update((current) => {
+      const id = crypto.randomUUID()
+      return {
+        ...current,
+        hypotheses: [...current.hypotheses, { id, name: row.name, entryId }],
+        entries: current.entries.map((entry) =>
+          entry.id === entryId
+            ? { ...entry, ratings: { ...entry.ratings, [id]: { why: row.why, reason: row.reason, likelihood: row.likelihood, support: row.support } } }
+            : entry,
+        ),
+      }
+    })
 
-  const addHypothesis = (entryId: string, name: string) =>
+  // A row changed through the form: the name applies to every table, the
+  // rest to this entry only.
+  const saveRow = (entryId: string, hypothesisId: string, row: EntryRowInput) =>
     update((current) => ({
       ...current,
-      hypotheses: [...current.hypotheses, { id: crypto.randomUUID(), name, entryId }],
+      hypotheses: current.hypotheses.map((hypothesis) =>
+        hypothesis.id === hypothesisId ? { ...hypothesis, name: row.name } : hypothesis,
+      ),
+      entries: current.entries.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              ratings: {
+                ...entry.ratings,
+                [hypothesisId]: { why: row.why, reason: row.reason, likelihood: row.likelihood, support: row.support },
+              },
+            }
+          : entry,
+      ),
     }))
 
   // Removing a hypothesis takes it off every table, ratings included.
@@ -617,7 +649,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[640px_minmax(0,1fr)]">
+        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,10fr)_minmax(0,11fr)]">
           {/* Transcript */}
           <section className={cn(CARD, "flex flex-col lg:min-h-0")}>
             <div className="flex min-h-8 items-center gap-3 px-5 py-3">
@@ -628,7 +660,21 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 </span>
               )}
               <div className="ml-auto flex items-center gap-3">
-                {selected.length > 0 ? (
+                {openEntry ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">
+                      Entry {entryViews.find((view) => view.entry.id === openEntry.id)?.number} · {openEntry.turns.length}{" "}
+                      {openEntry.turns.length === 1 ? "turn" : "turns"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveId(null)}
+                      className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    >
+                      Done
+                    </button>
+                  </>
+                ) : selected.length > 0 ? (
                   <>
                     <span className="text-xs text-muted-foreground">{selected.length} selected</span>
                     <button
@@ -660,9 +706,10 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 accentSpeaker={accentSpeaker}
                 exchanges={exchanges}
                 entries={transcriptEntries}
-                activeEntryId={activeId}
-                selected={selected}
-                onTurnClick={onTurnClick}
+                openEntryId={activeId}
+                checked={checkedTurns}
+                onToggleTurn={toggleTurn}
+                onOpenEntry={openEntryFromTurn}
                 registerTurn={(index, element) => {
                   turnRefs.current[index] = element
                 }}
@@ -685,11 +732,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 entry={view.entry}
                 excerpt={view.excerpt}
                 rows={view.rows}
-                active={view.entry.id === activeId}
-                onActivate={() => activateEntry(view.entry.id, true)}
+                open={view.entry.id === activeId}
+                onOpen={() => activateEntry(view.entry.id, true)}
                 onChange={(patch) => patchEntry(view.entry.id, patch)}
-                onRate={(hypothesisId, patch) => rate(view.entry.id, hypothesisId, patch)}
-                onAddHypothesis={(name) => addHypothesis(view.entry.id, name)}
+                onAddRow={(row) => addRow(view.entry.id, row)}
+                onSaveRow={(hypothesisId, row) => saveRow(view.entry.id, hypothesisId, row)}
                 onRemoveHypothesis={removeHypothesis}
                 onRemove={() => removeEntry(view.entry.id)}
                 cardRef={(element) => {
