@@ -114,6 +114,17 @@ export function extractMarkdownFromResponse(response: string): string {
 }
 
 /**
+ * Drop a leading level-1 title (e.g. "# SOAP Note") so the note starts at its
+ * first "## " section. The app supplies the note's title itself, and the
+ * section renderer, the drafting skeleton and the empty-note template all
+ * assume the note is exactly its four level-2 sections. Any other preamble is
+ * left alone — it is content, and the renderer shows it above the sections.
+ */
+export function stripDocumentTitle(markdown: string): string {
+  return markdown.replace(/^\s*#\s+[^\n]*\n+/, '');
+}
+
+/**
  * Normalize SOAP section headings to standard format
  * Handles abbreviations and casing variations (e.g. "S" -> "Subjective")
  */

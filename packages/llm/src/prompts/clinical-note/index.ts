@@ -5,12 +5,13 @@
 
 import * as v1 from "./v1"
 import * as v2 from "./v2"
+import * as v3 from "./v3"
 
-// Default to latest version (structured output)
-export const currentVersion = v2
+// Default to latest version (markdown note against the SOAP template)
+export const currentVersion = v3
 
 // Export all versions for A/B testing
-export { v1, v2 }
+export { v1, v2, v3 }
 
 // Re-export types
-export type { ClinicalNotePromptParams } from "./v2"
+export type { ClinicalNotePromptParams } from "./v3"
