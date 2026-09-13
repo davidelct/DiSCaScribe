@@ -65,7 +65,7 @@ function ConsultationsContent() {
           onUpload={(patient, reason, file) => void launch(patient, reason, { action: "upload", file })}
         />
       )}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+      <main className="mx-auto w-full flex-1 px-6 py-8">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">Consultations</h1>

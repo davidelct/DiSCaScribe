@@ -172,7 +172,7 @@ function PatientChartContent({ patientId }: { patientId: string }) {
           onUpload={(_, reason, file) => void launch(patient, reason, { action: "upload", file })}
         />
       )}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 pb-8">
+      <main className="mx-auto w-full flex-1 px-6 pb-8">
         {/* One row: back, who, and the way into a consultation. */}
         <div className="mb-4 flex items-center gap-3 border-b border-border py-2">
           <Link

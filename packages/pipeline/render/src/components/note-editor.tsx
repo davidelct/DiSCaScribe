@@ -493,7 +493,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-6 py-4">
+        <div className="mx-auto flex w-full flex-col gap-3 px-6 py-4">
           {live?.transcriptionStatus === "failed" && (
             <CaptureErrorRow
               message={live.transcriptionErrorMessage || "Transcription failed."}

@@ -127,7 +127,7 @@ export function TopBar() {
   return (
     <>
       <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-card/70 backdrop-blur-sm">
-        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-6">
+        <div className="mx-auto flex h-14 w-full items-center justify-between gap-4 px-6">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2.5">
               <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
