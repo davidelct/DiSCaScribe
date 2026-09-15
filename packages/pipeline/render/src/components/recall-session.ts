@@ -7,12 +7,12 @@ import { getEncounterAudio } from "@storage/audio-store"
  *
  * The clinician goes back over the transcript with an interviewer and stops
  * at turns of their choosing. Each stop is an entry holding the template's
- * table: one row per hypothesis with why the question was asked, what the
- * clinician was thinking when asking, the hypothesis, its likelihood (0–10)
- * and how much the answer supported it (−10..+10). The table carries
- * forward: a hypothesis reported at one stop is on every later table, and a
- * likelihood not re-rated at a stop is the one from the stop before.
- * Sessions are persisted per encounter in the encrypted store.
+ * table: one row per diagnostic hypothesis with the reason the question was
+ * asked, the hypothesis's likelihood (0–10) and how much the answer
+ * supported it (−10..+10). The table carries forward: a hypothesis reported
+ * at one stop is on every later table, and a likelihood not re-rated at a
+ * stop is the one from the stop before. Sessions are persisted per encounter
+ * in the encrypted store.
  */
 
 export interface RecallHypothesis {
@@ -24,9 +24,7 @@ export interface RecallHypothesis {
 
 /** One row of the table at one entry. */
 export interface RecallRating {
-  /** Why did you ask that? */
-  why: string
-  /** Reason for asking a question: what were you thinking when you asked that? */
+  /** Reason for asking the question, free text: what the clinician was after. */
   reason: string
   /** 0–10 as reported at this entry; null means carried over from the previous table. */
   likelihood: number | null
@@ -34,7 +32,7 @@ export interface RecallRating {
   support: number | null
 }
 
-export const EMPTY_RATING: RecallRating = { why: "", reason: "", likelihood: null, support: null }
+export const EMPTY_RATING: RecallRating = { reason: "", likelihood: null, support: null }
 
 export interface RecallEntry {
   id: string
@@ -78,7 +76,7 @@ export interface RecallTimeline {
 }
 
 export interface RecallSession {
-  version: 2
+  version: 3
   hypotheses: RecallHypothesis[]
   entries: RecallEntry[]
   finalDiagnosis: FinalDiagnosisRow[]
@@ -92,7 +90,7 @@ export const LIKELIHOOD_RANGE = { min: 0, max: 10 } as const
 export const SUPPORT_RANGE = { min: -10, max: 10 } as const
 
 export function emptyRecallSession(): RecallSession {
-  return { version: 2, hypotheses: [], entries: [], finalDiagnosis: [] }
+  return { version: 3, hypotheses: [], entries: [], finalDiagnosis: [] }
 }
 
 function storageKey(encounterId: string): string {
@@ -105,15 +103,19 @@ export function recallAudioKey(encounterId: string): string {
 }
 
 /**
- * The saved session, or an empty one. Sessions from before the per-stop
- * tables (per-utterance cue ratings on a −3..+3 scale) are not carried over:
- * the measure changed, so they start afresh and are overwritten on first save.
+ * The saved session, or an empty one. Version 2 sessions are migrated in
+ * place (see migrateEntry) and overwritten on first save. Sessions from
+ * before the per-stop tables (per-utterance cue ratings on a −3..+3 scale)
+ * are not carried over: the measure changed, so they start afresh.
  */
 export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
-  const saved = await loadSecureItem<Partial<RecallSession>>(storageKey(encounterId))
-  if (!saved || saved.version !== 2) return emptyRecallSession()
+  // The stored version is any past one, so it is read wider than RecallSession's.
+  const saved = await loadSecureItem<Omit<Partial<RecallSession>, "version"> & { version?: number }>(
+    storageKey(encounterId),
+  )
+  if (!saved || (saved.version !== 2 && saved.version !== 3)) return emptyRecallSession()
   return {
-    version: 2,
+    version: 3,
     hypotheses: saved.hypotheses ?? [],
     entries: (saved.entries ?? []).map(migrateEntry),
     finalDiagnosis: saved.finalDiagnosis ?? [],
@@ -122,26 +124,43 @@ export async function loadRecallSession(encounterId: string): Promise<RecallSess
   }
 }
 
+/** Non-empty pieces of free text as one block, in the order given. */
+function joinText(...parts: (string | undefined)[]): string {
+  return parts
+    .map((part) => part?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n")
+}
+
 /**
- * Entries saved by the first cut of this view kept a single "why" and
- * "thinking" per stop; the template has them per row. Fold them into the
- * first row that exists, else into the notes, so nothing typed is lost.
+ * Rows from earlier cuts of this view. The first kept a single "why" and
+ * "thinking" per stop, before the template put them per row; rows then kept
+ * "why did you ask that?" beside "what were you thinking?" until the study
+ * settled on one free-text reason for asking. Fold every legacy field into
+ * the reason it belongs to — the first row that exists, or the notes when
+ * there is none — so nothing typed is lost.
  */
+type LegacyRating = RecallRating & { why?: string }
+
 function migrateEntry(raw: RecallEntry & { why?: string; thinking?: string }): RecallEntry {
   const { why, thinking, ...entry } = raw
   const ratings: Record<string, RecallRating> = Object.fromEntries(
-    Object.entries(entry.ratings ?? {}).map(([id, rating]) => [id, { ...EMPTY_RATING, ...rating }]),
+    Object.entries((entry.ratings ?? {}) as Record<string, LegacyRating>).map(([id, rating]) => [
+      id,
+      {
+        reason: joinText(rating.why, rating.reason),
+        likelihood: rating.likelihood ?? null,
+        support: rating.support ?? null,
+      },
+    ]),
   )
-  const legacy = { why: why?.trim() ?? "", thinking: thinking?.trim() ?? "" }
   let notes = entry.notes ?? ""
-  if (legacy.why || legacy.thinking) {
+  if (why?.trim() || thinking?.trim()) {
     const firstRow = Object.keys(ratings)[0]
     if (firstRow) {
-      ratings[firstRow] = { ...ratings[firstRow], why: ratings[firstRow].why || legacy.why, reason: ratings[firstRow].reason || legacy.thinking }
+      ratings[firstRow] = { ...ratings[firstRow], reason: joinText(ratings[firstRow].reason, why, thinking) }
     } else {
-      notes = [notes, legacy.why && `Why: ${legacy.why}`, legacy.thinking && `Thinking: ${legacy.thinking}`]
-        .filter(Boolean)
-        .join("\n")
+      notes = joinText(notes, why?.trim() && `Why: ${why.trim()}`, thinking?.trim() && `Thinking: ${thinking.trim()}`)
     }
   }
   return { ...entry, notes, ratings }
@@ -238,7 +257,7 @@ export function buildRecallPayload(input: RecallPayloadInput) {
   const questionTurns = new Set(exchanges.map((exchange) => exchange.question))
   const timeline = session.timeline
   return {
-    schema_version: 2,
+    schema_version: 3,
     encounter_id: encounterId,
     exported_at: new Date().toISOString(),
     clinician_speaker: clinicianSpeaker ?? null,
@@ -259,16 +278,15 @@ export function buildRecallPayload(input: RecallPayloadInput) {
       })),
       is_question: questionTurns.has(entry.turns[0]),
       notes: entry.notes,
-      // The template's table, one row per hypothesis.
+      // The template's table, one row per diagnostic hypothesis.
       rows: hypothesesAt(session, ordered, position).map((hypothesis) => {
         const rating = entry.ratings[hypothesis.id]
         const reported = rating?.likelihood ?? null
         const carried = reported === null ? carriedLikelihood(ordered, position, hypothesis.id) : null
         return {
-          why: rating?.why ?? "",
-          reason: rating?.reason ?? "",
           hypothesis_id: hypothesis.id,
           hypothesis: hypothesis.name,
+          reason: rating?.reason ?? "",
           likelihood: reported ?? carried,
           likelihood_source: reported !== null ? "reported" : carried !== null ? "carried" : null,
           support: rating?.support ?? null,

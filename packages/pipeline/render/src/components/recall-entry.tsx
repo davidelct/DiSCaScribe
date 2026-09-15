@@ -16,6 +16,10 @@ import {
  * One stop of the recall interview as a card: the turns it is about, the
  * template's table as a summary of the rows so far, and a form below it
  * that adds a row. Clicking a row loads it into the form to change it.
+ *
+ * A row is what the study asks of the clinician at a question: the
+ * diagnostic hypothesis, the reason for asking, how likely the hypothesis
+ * seemed (0–10), and how much the answer supported it (−10..+10).
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
@@ -61,7 +65,6 @@ export interface EntryExcerptLine {
 /** One row of the table: a hypothesis at this entry, with what the previous table carried. */
 export interface EntryRow {
   hypothesis: RecallHypothesis
-  why: string
   reason: string
   /** As reported at this entry, or null when carried. */
   likelihood: number | null
@@ -73,7 +76,6 @@ export interface EntryRow {
 /** What the form submits. */
 export interface EntryRowInput {
   name: string
-  why: string
   reason: string
   likelihood: number | null
   support: number | null
@@ -95,7 +97,7 @@ interface RecallEntryCardProps {
   cardRef: (element: HTMLElement | null) => void
 }
 
-const EMPTY_FORM = { why: "", reason: "", name: "", likelihood: "", support: "" }
+const EMPTY_FORM = { name: "", reason: "", likelihood: "", support: "" }
 
 export function RecallEntryCard({
   number,
@@ -123,9 +125,8 @@ export function RecallEntryCard({
   const editRow = (row: EntryRow) => {
     setEditingId(row.hypothesis.id)
     setForm({
-      why: row.why,
-      reason: row.reason,
       name: row.hypothesis.name,
+      reason: row.reason,
       likelihood: row.likelihood !== null ? String(row.likelihood) : row.carried !== null ? String(row.carried) : "",
       support: row.support !== null ? String(row.support) : "",
     })
@@ -142,7 +143,6 @@ export function RecallEntryCard({
     if (!name) return
     const row: EntryRowInput = {
       name,
-      why: form.why.trim(),
       reason: form.reason.trim(),
       likelihood: parseScale(form.likelihood, LIKELIHOOD_RANGE.min, LIKELIHOOD_RANGE.max),
       support: parseScale(form.support, SUPPORT_RANGE.min, SUPPORT_RANGE.max),
@@ -206,9 +206,8 @@ export function RecallEntryCard({
         <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={cn(TH, "w-[25%]")}>Why</th>
-              <th className={cn(TH, "w-[28%]")}>Reason for asking</th>
-              <th className={TH}>Hypothesis</th>
+              <th className={cn(TH, "w-[32%]")}>Hypothesis</th>
+              <th className={TH}>Reason for asking</th>
               <th className={cn(TH, "w-[76px] text-center")}>Likelihood</th>
               <th className={cn(TH, "w-[64px] pr-0 text-center")}>Support</th>
               {open && <th className="w-6" />}
@@ -217,7 +216,7 @@ export function RecallEntryCard({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={open ? 6 : 5} className="py-2 text-xs text-muted-foreground">
+                <td colSpan={open ? 5 : 4} className="py-2 text-xs text-muted-foreground">
                   No rows yet.
                 </td>
               </tr>
@@ -233,9 +232,8 @@ export function RecallEntryCard({
                   editingId === row.hypothesis.id && "bg-brand-soft/50",
                 )}
               >
-                <td className={TD}>{row.why}</td>
-                <td className={TD}>{row.reason}</td>
                 <td className={cn(TD, "text-sm")}>{row.hypothesis.name}</td>
+                <td className={TD}>{row.reason}</td>
                 <td className={cn(TD, "text-center font-mono font-semibold")}>
                   {row.likelihood !== null ? (
                     row.likelihood
@@ -273,18 +271,13 @@ export function RecallEntryCard({
         {/* The form: how a row is added, or changed once clicked. */}
         {open && (
           <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-lg border border-border bg-background p-3">
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              <Field label="Why did you ask that?">
-                <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
-              </Field>
-              <Field label="Reason for asking: what were you thinking?">
-                <textarea rows={2} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={cn(BOX, "resize-none")} />
-              </Field>
-            </div>
+            <Field label="Diagnostic hypothesis">
+              <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={BOX} />
+            </Field>
+            <Field label="Reason for asking">
+              <textarea rows={2} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={cn(BOX, "resize-none")} />
+            </Field>
             <div className="flex flex-wrap items-end gap-2.5">
-              <Field label="Hypothesis" className="min-w-[200px] flex-1">
-                <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={BOX} />
-              </Field>
               <Field label="Likelihood 0–10">
                 <input
                   type="number"
@@ -297,7 +290,7 @@ export function RecallEntryCard({
                   className={NUMBER_BOX}
                 />
               </Field>
-              <Field label="Support −10 to +10">
+              <Field label="Information support −10 to +10">
                 <input
                   type="number"
                   inputMode="numeric"

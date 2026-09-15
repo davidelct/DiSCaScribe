@@ -12,6 +12,7 @@ import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
 import { FinalDiagnosisCard, RecallEntryCard, type EntryRow, type EntryRowInput } from "./recall-entry"
 import {
+  EMPTY_RATING,
   buildRecallPayload,
   carriedLikelihood,
   emptyRecallSession,
@@ -32,11 +33,10 @@ import {
  * consultation view, every turn clickable and the question–answer exchanges
  * bracketed (detected by a small model beside note generation, or by a
  * question-mark heuristic until then). Right, the template's table once per
- * stop in transcript order: a row per hypothesis with why the question was
- * asked, what the clinician was thinking, the hypothesis, its likelihood and
- * how much the answer supported it. A new table starts from the previous
- * one. The recall interview can be recorded alongside, with every turn click
- * timed against the recording.
+ * stop in transcript order: a row per diagnostic hypothesis with the reason
+ * for asking, the hypothesis's likelihood and how much the answer supported
+ * it. A new table starts from the previous one. The recall interview can be
+ * recorded alongside, with every turn click timed against the recording.
  */
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
@@ -229,10 +229,9 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     () =>
       ordered.map((entry, position) => {
         const rows: EntryRow[] = hypothesesAt(session, ordered, position).map((hypothesis) => {
-          const rating = entry.ratings[hypothesis.id] ?? { why: "", reason: "", likelihood: null, support: null }
+          const rating = entry.ratings[hypothesis.id] ?? EMPTY_RATING
           return {
             hypothesis,
-            why: rating.why,
             reason: rating.reason,
             likelihood: rating.likelihood,
             carried: carriedLikelihood(ordered, position, hypothesis.id),
@@ -381,7 +380,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
         hypotheses: [...current.hypotheses, { id, name: row.name, entryId }],
         entries: current.entries.map((entry) =>
           entry.id === entryId
-            ? { ...entry, ratings: { ...entry.ratings, [id]: { why: row.why, reason: row.reason, likelihood: row.likelihood, support: row.support } } }
+            ? { ...entry, ratings: { ...entry.ratings, [id]: { reason: row.reason, likelihood: row.likelihood, support: row.support } } }
             : entry,
         ),
       }
@@ -401,7 +400,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
               ...entry,
               ratings: {
                 ...entry.ratings,
-                [hypothesisId]: { why: row.why, reason: row.reason, likelihood: row.likelihood, support: row.support },
+                [hypothesisId]: { reason: row.reason, likelihood: row.likelihood, support: row.support },
               },
             }
           : entry,
