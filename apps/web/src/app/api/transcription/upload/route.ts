@@ -161,9 +161,15 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "Content-Type": "application/json" },
-      })
+      // The transcript rides in the response as well as on the event stream.
+      // The stream is fed from an in-memory store, and on serverless the
+      // instance holding the browser's stream may not be the one that ran
+      // this request; the response cannot miss. Same payload shape as the
+      // stream's `final` event, so the browser applies whichever arrives first.
+      return new Response(
+        JSON.stringify({ ok: true, final_transcript: transcript, final_transcript_words: detail.words }),
+        { headers: { "Content-Type": "application/json" } },
+      )
     } catch (error) {
       console.error("Uploaded audio processing failed", error)
       const resolvedProvider = resolveTranscriptionProvider()

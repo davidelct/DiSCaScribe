@@ -619,6 +619,30 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     ],
   )
 
+  // The upload calls apply a transcript from their own response through the
+  // same handler; a ref so their stable callbacks always see the latest one.
+  const handleFinalEventRef = useRef(handleFinalEvent)
+  useEffect(() => {
+    handleFinalEventRef.current = handleFinalEvent
+  }, [handleFinalEvent])
+
+  /**
+   * Apply the transcript carried in the upload route's own response. The
+   * stream delivers the same payload, but from an in-memory store that a
+   * different serverless instance may never see; the response cannot miss.
+   * Whichever arrives first wins and the other is a no-op.
+   */
+  const applyFinalFromResponse = useCallback(async (response: Response) => {
+    let body: { final_transcript?: string } = {}
+    try {
+      body = (await response.clone().json()) as typeof body
+    } catch {
+      return
+    }
+    if (!body.final_transcript || finalTranscriptRef.current) return
+    handleFinalEventRef.current(new MessageEvent("final", { data: JSON.stringify(body) }))
+  }, [])
+
   const handleStreamError = useCallback((event: MessageEvent | Event) => {
     const readyState = eventSourceRef.current?.readyState
     const hasFinalTranscript = Boolean(finalTranscriptRef.current?.trim())
@@ -833,6 +857,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
           }
           throw failure.error
         }
+        await applyFinalFromResponse(response)
       } catch (error) {
         if (attempt < 3) {
           await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
@@ -848,7 +873,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         throw error
       }
     },
-    [],
+    [applyFinalFromResponse],
   )
 
   const uploadAudioFile = useCallback(
@@ -898,7 +923,10 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
           throw networkError
         }
 
-        if (response.ok) return
+        if (response.ok) {
+          await applyFinalFromResponse(response)
+          return
+        }
 
         const retryable = response.status === 429 || response.status >= 500
         if (retryable && attempt < maxAttempts) {
@@ -939,7 +967,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         throw failure.error
       }
     },
-    [],
+    [applyFinalFromResponse],
   )
 
   const handleUploadRecording = async (file: File) => {
