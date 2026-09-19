@@ -20,6 +20,8 @@ interface EncounterPayload {
   language?: string
   created_at?: string
   recording_duration?: number
+  /** "browser" or "raw"; how the microphone was captured. Absent for uploads. */
+  microphone_processing?: string
 }
 
 function jsonError(status: number, code: string, message: string) {
@@ -112,6 +114,12 @@ export async function POST(req: NextRequest) {
       visitReason: encounter.visit_reason || "",
       language: encounter.language || "en",
       recordingDurationSeconds: encounter.recording_duration,
+      capture: {
+        microphoneProcessing:
+          encounter.microphone_processing === "raw" || encounter.microphone_processing === "browser"
+            ? encounter.microphone_processing
+            : undefined,
+      },
       transcription: {
         provider: resolvedProvider.provider,
         model: resolvedProvider.model,

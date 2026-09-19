@@ -18,6 +18,14 @@ export interface UserPreferences {
    * is: the vocabulary must not vary between recordings being compared.
    */
   keytermsOverride?: string[]
+  /**
+   * Record the microphone as-is, without the browser's echo cancellation,
+   * noise suppression and automatic gain. Off by default: that processing is
+   * what every earlier recording had. Global for the same reason as the
+   * others: recordings being compared must not differ in capture settings
+   * without it being deliberate, and metadata.json records which was used.
+   */
+  rawMicrophone?: boolean
 }
 
 const PREFERENCES_KEY = "openscribe_preferences"

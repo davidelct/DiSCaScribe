@@ -196,6 +196,12 @@ export interface ArchiveNoteInput {
   visitReason: string
   language: string
   recordingDurationSeconds?: number
+  /**
+   * How the recording was captured. Recorded so recordings made with and
+   * without the browser's microphone processing can be told apart afterwards;
+   * absent for uploaded files and for recordings from before the setting.
+   */
+  capture?: { microphoneProcessing?: "browser" | "raw" }
   transcription: {
     provider: string
     model: string
@@ -309,6 +315,7 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     visitReason: input.visitReason,
     language: input.language,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
+    capture: { microphoneProcessing: input.capture?.microphoneProcessing ?? null },
     transcription: input.transcription,
     note: input.note
       ? {

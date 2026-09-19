@@ -134,6 +134,9 @@ export interface RecallAnalysis {
   detected_at: string
 }
 
+/** Capture processing for a recording; see Encounter.microphone_processing. */
+export type MicrophoneProcessing = "browser" | "raw"
+
 export interface Encounter {
   id: string
   patient_name: string
@@ -185,6 +188,14 @@ export interface Encounter {
   mode?: EncounterMode
   language: string
   recording_duration?: number
+  /**
+   * How the microphone was captured: with the browser's echo cancellation,
+   * noise suppression and automatic gain ("browser"), or as-is ("raw").
+   * Absent on uploads and on recordings from before the setting existed,
+   * which were all "browser". Mirrors MicrophoneProcessing in @audio; kept
+   * here so storage stays free of the pipeline packages.
+   */
+  microphone_processing?: MicrophoneProcessing
   /** Archival state, when archiving is enabled (see /api/archive/note). */
   archive_status?: ArchiveStatus
   /** Per-consultation container id (Box folder id, or R2 key prefix). */

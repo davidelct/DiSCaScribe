@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { PipelineStageError, type PipelineError } from "../../../shared/src/error"
 import { toAudioIngestError } from "../errors"
+import { buildMicrophoneConstraints, type MicrophoneProcessing } from "./capture-constraints"
 import {
   DEFAULT_OVERLAP_MS,
   DEFAULT_SEGMENT_MS,
@@ -30,6 +31,12 @@ interface UseAudioRecorderOptions {
   overlapMs?: number
   preferredInputDeviceId?: string
   /**
+   * Whether the browser's echo cancellation, noise suppression and automatic
+   * gain run on the capture ("browser", the default) or the microphone is
+   * recorded as-is ("raw"). See capture-constraints.ts.
+   */
+  microphoneProcessing?: MicrophoneProcessing
+  /**
    * Emit incremental segments during recording for a live transcript preview.
    * Disable for final-pass-only providers (e.g. Deepgram): the full recording is
    * still accumulated and returned by stopRecording(); only segment chunking and
@@ -53,7 +60,14 @@ interface UseAudioRecorderReturn {
 }
 
 export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudioRecorderReturn {
-  const { onSegmentReady, segmentDurationMs = DEFAULT_SEGMENT_MS, overlapMs = DEFAULT_OVERLAP_MS, preferredInputDeviceId, emitSegments = true } = options
+  const {
+    onSegmentReady,
+    segmentDurationMs = DEFAULT_SEGMENT_MS,
+    overlapMs = DEFAULT_OVERLAP_MS,
+    preferredInputDeviceId,
+    microphoneProcessing = "browser",
+    emitSegments = true,
+  } = options
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -193,12 +207,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
       allSamplesRef.current = []
       seqRef.current = 0
 
-      const buildAudioConstraints = (deviceId?: string) => ({
-        echoCancellation: true,
-        noiseSuppression: true,
-        channelCount: 1,
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      })
+      const buildAudioConstraints = (deviceId?: string) => buildMicrophoneConstraints(microphoneProcessing, deviceId)
 
       let microphoneStream: MediaStream
       try {
@@ -262,7 +271,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudi
         pipelineError.details,
       )
     }
-  }, [cleanupAudio, preferredInputDeviceId, setupProcessor, startTimer])
+  }, [cleanupAudio, microphoneProcessing, preferredInputDeviceId, setupProcessor, startTimer])
 
   const finalizeRecording = useCallback(async (): Promise<Blob | null> => {
     try {

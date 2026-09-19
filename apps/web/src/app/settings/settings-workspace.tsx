@@ -11,13 +11,14 @@ import { useCallback, useEffect, useState } from "react"
 import { ErrorBoundary, SettingsPanel, useHttpsWarning } from "@ui"
 import { warmupMicrophonePermission } from "@audio"
 import { getPreferences, setPreferences, debugWarn } from "@storage"
-import type { EncounterMode } from "@storage/types"
+import type { EncounterMode, MicrophoneProcessing } from "@storage/types"
 import { TopBar } from "../top-bar"
 
 function SettingsContent() {
   const httpsWarning = useHttpsWarning()
   const [audioInputDevices, setAudioInputDevices] = useState<Array<{ id: string; label: string }>>([])
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
+  const [microphoneProcessing, setMicrophoneProcessing] = useState<MicrophoneProcessing>("browser")
   const [defaultMode, setDefaultMode] = useState<EncounterMode>("scribed")
   // undefined = the committed default vocabulary is in use.
   const [keytermsOverride, setKeytermsOverride] = useState<string[] | undefined>(undefined)
@@ -28,6 +29,7 @@ function SettingsContent() {
   useEffect(() => {
     const prefs = getPreferences()
     setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
+    setMicrophoneProcessing(prefs.rawMicrophone ? "raw" : "browser")
     setDefaultMode(prefs.encounterMode || "scribed")
     setKeytermsOverride(prefs.keytermsOverride)
   }, [])
@@ -81,6 +83,11 @@ function SettingsContent() {
     void setPreferences({ preferredInputDeviceId: value })
   }, [])
 
+  const handleMicrophoneProcessingChange = useCallback((value: MicrophoneProcessing) => {
+    setMicrophoneProcessing(value)
+    void setPreferences({ rawMicrophone: value === "raw" })
+  }, [])
+
   const handleDefaultModeChange = useCallback((value: EncounterMode) => {
     setDefaultMode(value)
     void setPreferences({ encounterMode: value })
@@ -105,6 +112,8 @@ function SettingsContent() {
           audioInputDevices={audioInputDevices}
           preferredInputDeviceId={preferredInputDeviceId}
           onPreferredInputDeviceChange={handlePreferredInputDeviceChange}
+          microphoneProcessing={microphoneProcessing}
+          onMicrophoneProcessingChange={handleMicrophoneProcessingChange}
           encounterMode={defaultMode}
           onEncounterModeChange={handleDefaultModeChange}
           keytermsOverride={keytermsOverride}

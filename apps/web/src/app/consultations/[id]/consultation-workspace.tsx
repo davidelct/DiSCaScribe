@@ -25,7 +25,7 @@ import {
   toPipelineError,
   type PipelineError,
 } from "@pipeline-errors"
-import type { Encounter, TranscriptWordSpan } from "@storage/types"
+import type { Encounter, MicrophoneProcessing, TranscriptWordSpan } from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
@@ -87,6 +87,8 @@ interface ArchivePayload {
     language: string
     created_at: string
     recording_duration?: number
+    /** How the microphone was captured, when the audio was recorded in the app. */
+    microphone_processing?: MicrophoneProcessing
   }
   /** Omitted for consultations that have no note yet. */
   note?: string
@@ -213,6 +215,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
 
   const [showPermissionsDialog, setShowPermissionsDialog] = useState(false)
   const [preferredInputDeviceId, setPreferredInputDeviceId] = useState("")
+  const [microphoneProcessing, setMicrophoneProcessing] = useState<MicrophoneProcessing>("browser")
   const [micPermissionStatus, setMicPermissionStatus] = useState("unknown")
   // Written by every failure path for parity with the old flow's diagnostics;
   // the settings dialog (top bar) surfaces its own readiness state instead.
@@ -227,7 +230,9 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   }, [])
 
   useEffect(() => {
-    setPreferredInputDeviceId(getPreferences().preferredInputDeviceId || "")
+    const prefs = getPreferences()
+    setPreferredInputDeviceId(prefs.preferredInputDeviceId || "")
+    setMicrophoneProcessing(prefs.rawMicrophone ? "raw" : "browser")
   }, [])
 
   // Surface the consultation's capture mode on <html> so the stylesheet flips
@@ -363,6 +368,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     segmentDurationMs: SEGMENT_DURATION_MS,
     overlapMs: OVERLAP_MS,
     preferredInputDeviceId,
+    microphoneProcessing,
     emitSegments: liveSegmentsEnabled,
   })
 
@@ -453,6 +459,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
               language: enc.language,
               created_at: enc.created_at,
               recording_duration: enc.recording_duration,
+              microphone_processing: enc.microphone_processing,
             },
             note,
             note_version: note !== undefined ? (noteVersion ?? 0) : undefined,
@@ -756,6 +763,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         transcript_text: "",
         // Drop any prior spans with the transcript they indexed into.
         transcript_confidence: [],
+        // Which capture the recording used, so recordings can be compared.
+        microphone_processing: microphoneProcessing,
       })
 
       // Optimistically flip to recording immediately for responsive UI.

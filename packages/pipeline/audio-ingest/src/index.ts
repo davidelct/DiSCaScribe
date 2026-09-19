@@ -1,5 +1,7 @@
 export { useAudioRecorder } from "./capture/use-audio-recorder"
 export type { RecordedSegment } from "./capture/use-audio-recorder"
+export { buildMicrophoneConstraints } from "./capture/capture-constraints"
+export type { MicrophoneProcessing } from "./capture/capture-constraints"
 export { compressAudioFileToMp3, chooseBitrateKbps, DEFAULT_COMPRESSION_TARGET_BYTES } from "./capture/compress-audio"
 export type { CompressedAudio, CompressAudioOptions } from "./capture/compress-audio"
 export { toAudioIngestError } from "./errors"

@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@ui/lib/ui/button"
 import { Label } from "@ui/lib/ui/label"
+import { Switch } from "@ui/lib/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ui/lib/ui/select"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
 import { loadByokApiKeys, saveByokApiKeys } from "@storage/api-keys-client"
-import type { EncounterMode } from "@storage/types"
+import type { EncounterMode, MicrophoneProcessing } from "@storage/types"
 import { AuditLogViewer } from "./audit-log-viewer"
 import { KeytermEditor } from "./keyterm-editor"
 
@@ -20,6 +21,9 @@ export interface SettingsPanelProps {
   audioInputDevices: Array<{ id: string; label: string }>
   preferredInputDeviceId?: string
   onPreferredInputDeviceChange: (value: string) => void
+  /** How the microphone is captured; see the "Raw microphone" switch. */
+  microphoneProcessing: MicrophoneProcessing
+  onMicrophoneProcessingChange: (value: MicrophoneProcessing) => void
   encounterMode: EncounterMode
   onEncounterModeChange: (value: EncounterMode) => void
   /** Keyterm override; absent means the committed default list is in use. */
@@ -49,6 +53,8 @@ export function SettingsPanel({
   audioInputDevices,
   preferredInputDeviceId,
   onPreferredInputDeviceChange,
+  microphoneProcessing,
+  onMicrophoneProcessingChange,
   encounterMode,
   onEncounterModeChange,
   keytermsOverride,
@@ -155,6 +161,25 @@ export function SettingsPanel({
                   ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-background p-3">
+            <div className="space-y-1">
+              <Label htmlFor="raw-microphone" className="text-sm font-medium text-foreground">
+                Raw microphone
+              </Label>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Record the microphone as-is, without the browser&apos;s echo cancellation, noise suppression and
+                automatic gain. Those are tuned for one voice on a video call and can turn down a second speaker
+                sitting further from the laptop. Applies to new recordings; each recording notes which setting it
+                used.
+              </p>
+            </div>
+            <Switch
+              id="raw-microphone"
+              checked={microphoneProcessing === "raw"}
+              onCheckedChange={(checked) => onMicrophoneProcessingChange(checked ? "raw" : "browser")}
+              aria-label="Raw microphone"
+            />
           </div>
           <div>
             <Button variant="outline" onClick={() => void onRunMicrophoneCheck()} className="h-9 rounded-md">
