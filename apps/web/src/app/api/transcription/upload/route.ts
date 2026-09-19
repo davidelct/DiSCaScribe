@@ -98,6 +98,12 @@ export async function POST(req: NextRequest) {
       return jsonError(400, "validation_error", "Uploaded audio file is empty", true)
     }
     const { buffer, contentType, filename } = audio
+    // Which path the audio took and how big it was: the staged copy is deleted
+    // once this request answers, so this line is the record that the Blob
+    // path ran. No content, no identifiers.
+    console.info(
+      `[upload] audio via ${blobUrl ? "blob store" : "request body"}: ${(buffer.byteLength / 1e6).toFixed(1)} MB, ${contentType}`,
+    )
 
     transcriptionSessionStore.setStatus(sessionId, "finalizing")
 
