@@ -29,10 +29,17 @@ import type { Encounter, TranscriptWordSpan } from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
-import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission, compressAudioFileToMp3 } from "@audio"
-import { formatKeyterms, resolveKeyterms, useSegmentUpload, type UploadError } from "@transcription"
+import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission } from "@audio"
+import { formatKeyterms, resolveKeyterms, useSegmentUpload, type UploadCapability, type UploadError } from "@transcription"
 import { detectRecallExchanges, generateClinicalNote } from "@/app/actions"
 import { takeConsultationIntent } from "@/lib/consultation-intent"
+import {
+  appendAudioSource,
+  compressForUpload,
+  fetchUploadCapability,
+  stageAudio,
+  transcriptionApiUrl,
+} from "@/lib/transcription-upload"
 import {
   appendNoteVersion,
   noteVersionsOf,
@@ -757,29 +764,27 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   const uploadFinalRecording = useCallback(
     async (activeSessionId: string, blob: Blob, encId: string, createdAt: string, attempt = 1): Promise<void> => {
       try {
-        // Recordings are raw 16 kHz mono WAV (~1.9 MB/min), which blows past hosted
-        // request-body limits for consults longer than a few minutes. Compress to a
-        // small MP3 first; fall back to the raw WAV only if compression fails.
-        let file = new File([blob], `${activeSessionId}-full.wav`, { type: blob.type || "audio/wav" })
-        try {
-          const compressed = await compressAudioFileToMp3(file)
-          file = new File([compressed.blob], `${activeSessionId}-full.mp3`, { type: "audio/mpeg" })
-          debugLog(
-            `[final] compressed recording: ${(blob.size / 1e6).toFixed(1)}MB -> ` +
-              `${(file.size / 1e6).toFixed(2)}MB @ ${compressed.bitrateKbps}kbps`,
-          )
-        } catch (compressionError) {
-          debugWarn("Recording compression failed; uploading raw WAV", compressionError)
-        }
+        // Recordings are raw 16 kHz mono WAV (~1.9 MB/min). Compress to MP3 at the
+        // best bitrate the upload path allows: 64 kbps when the audio can be staged
+        // in the Blob store, squeezed to the request-body limit otherwise. The raw
+        // WAV goes only if compression itself fails.
+        const baseUrl = apiBaseUrlRef.current
+        const capability = await fetchUploadCapability(baseUrl)
+        const file = await compressForUpload(
+          new File([blob], `${activeSessionId}-full.wav`, { type: blob.type || "audio/wav" }),
+          capability,
+          "final",
+        )
 
         // Keep a local copy so the clinician can listen back later. Best-effort.
         if (encId) {
           void saveEncounterAudio(encId, file).catch((e) => debugWarn("Failed to store recording for playback", e))
         }
 
+        const source = await stageAudio(file, capability, baseUrl)
         const formData = new FormData()
         formData.append("session_id", activeSessionId)
-        formData.append("file", file, file.name)
+        appendAudioSource(formData, source)
         // Sent so the server can file the phase-1 artifacts (audio + raw
         // transcript) under the same per-consult container the note upload uses.
         if (encId) formData.append("encounter_id", encId)
@@ -787,10 +792,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
         // Keyterm vocabulary is a client-side setting, so it rides with the
         // request rather than being read from server config.
         formData.append("keyterms", formatKeyterms(resolveKeyterms(getPreferences().keytermsOverride)))
-        const baseUrl = apiBaseUrlRef.current
-        const url = baseUrl
-          ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
-          : "/api/transcription/upload"
+        const url = transcriptionApiUrl(baseUrl, "/api/transcription/upload")
         // BYOK sessions supply their own Deepgram key with each request.
         const byokKeys = await loadByokApiKeys()
         const response = await fetch(url, {
@@ -850,22 +852,29 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   )
 
   const uploadAudioFile = useCallback(
-    async (activeSessionId: string, file: File, encId: string, createdAt: string): Promise<void> => {
+    async (
+      activeSessionId: string,
+      file: File,
+      capability: UploadCapability,
+      encId: string,
+      createdAt: string,
+    ): Promise<void> => {
       // Keep a local copy for later playback (best-effort).
       if (encId) {
         void saveEncounterAudio(encId, file).catch((e) => debugWarn("Failed to store recording for playback", e))
       }
       const baseUrl = apiBaseUrlRef.current
-      const url = baseUrl
-        ? `${baseUrl.replace(/\/+$/, "")}/api/transcription/upload`
-        : "/api/transcription/upload"
+      const url = transcriptionApiUrl(baseUrl, "/api/transcription/upload")
       const maxAttempts = 3
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         let response: Response
         try {
+          // Staged afresh on every attempt: the server discards the staged copy
+          // once it has answered, whatever the answer was.
+          const source = await stageAudio(file, capability, baseUrl)
           const formData = new FormData()
           formData.append("session_id", activeSessionId)
-          formData.append("file", file, file.name || `${activeSessionId}-upload`)
+          appendAudioSource(formData, source)
           if (encId) formData.append("encounter_id", encId)
           if (createdAt) formData.append("created_at", createdAt)
           formData.append("keyterms", formatKeyterms(resolveKeyterms(getPreferences().keytermsOverride)))
@@ -899,7 +908,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
 
         if (response.status === 413) {
           const message =
-            "This recording is too long to upload on the hosted demo (request limit ~4.5 MB even after compression). Try a shorter file."
+            "This recording is too large for the server's request limit (~4.5 MB). Attach a Blob store to lift it, or try a shorter file."
           setTranscriptionErrorMessage(message)
           setWorkflowError(createPipelineError("file_too_large", message, true))
           setTranscriptionStatus("failed")
@@ -958,21 +967,12 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
       })
       setLive("processing")
 
-      // Compress in the browser (16 kHz mono MP3) so the upload stays under the
-      // hosted serverless request-size limit. Fall back to the original on failure.
-      let uploadFile: File = file
-      try {
-        const compressed = await compressAudioFileToMp3(file)
-        uploadFile = new File([compressed.blob], compressed.filename, { type: "audio/mpeg" })
-        debugLog(
-          `[upload] compressed ${file.name}: ${(file.size / 1e6).toFixed(1)}MB -> ` +
-            `${(uploadFile.size / 1e6).toFixed(2)}MB @ ${compressed.bitrateKbps}kbps`,
-        )
-      } catch (compressionError) {
-        debugWarn("Audio compression failed; uploading original file", compressionError)
-      }
+      // Compress in the browser (16 kHz mono MP3) at the best bitrate the upload
+      // path allows; the original goes only if it cannot be decoded.
+      const capability = await fetchUploadCapability(apiBaseUrlRef.current)
+      const uploadFile = await compressForUpload(file, capability, "upload")
 
-      await uploadAudioFile(session, uploadFile, encounter.id, encounter.created_at)
+      await uploadAudioFile(session, uploadFile, capability, encounter.id, encounter.created_at)
     } catch (err) {
       debugError("Failed to upload recording:", err)
       setTranscriptionErrorMessage((previous) => previous || "Failed to transcribe the uploaded file.")

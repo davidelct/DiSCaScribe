@@ -4,13 +4,19 @@ import { parseKeyterms, resolveTranscriptionProvider, transcribeWithResolvedProv
 import { transcriptionSessionStore } from "@transcript-assembly"
 import { writeAuditEntry } from "@storage/audit-log"
 import { archiveTranscriptionArtifacts, getArchivalConfig } from "@/lib/archival"
+import { discardStagedAudio, readStagedAudio, type UploadedAudio } from "@/lib/blob-audio"
 import { DEEPGRAM_KEY_HEADER, resolveRequestKey } from "@/lib/request-keys"
 
 export const runtime = "nodejs"
+// A staged recording is pulled from the Blob store and pushed to Deepgram
+// within this one request: an hour at 64 kbps is ~29 MB each way. Within the
+// limit of every Vercel plan.
+export const maxDuration = 60
 
-// Cap upload size to protect the server and surface a clear error. Note: hosted
-// serverless platforms (e.g. Vercel) impose their own, smaller request-body
-// limits, so very large files may be rejected before reaching this handler.
+// Cap upload size to protect the server and surface a clear error. Hosted
+// serverless platforms impose their own, smaller request-body limit (Vercel:
+// 4.5 MB) before the request reaches this handler; the Blob staging path
+// exists to get long recordings around that.
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
 
 function jsonError(status: number, code: string, message: string, recoverable: boolean) {
@@ -33,11 +39,16 @@ function isBlankTranscript(text: string): boolean {
 
 /**
  * Transcribe an uploaded audio file in a single pass (no live segments).
- * Unlike the recording final route, the bytes are sent to the provider as-is —
- * Deepgram accepts any common format/sample rate (wav/mp3/m4a/…) and we forward
- * the file's MIME type. Diarization is enabled, matching the recording flow.
+ *
+ * The audio arrives either in the request (`file`) or staged in the private
+ * Blob store by the browser (`blob_url`) — the path long recordings take so
+ * the hosted request-body limit stops dictating their bitrate. Either way the
+ * bytes go to the provider as-is with their MIME type; Deepgram accepts any
+ * common format/sample rate. Diarization is enabled, matching the recording
+ * flow. A staged copy is discarded once this request has answered.
  */
 export async function POST(req: NextRequest) {
+  let stagedUrl = ""
   try {
     // BYOK sessions must supply their own Deepgram key; full sessions may.
     const keys = await resolveRequestKey(req, DEEPGRAM_KEY_HEADER)
@@ -48,6 +59,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData()
     const sessionId = formData.get("session_id")
     const file = formData.get("file")
+    const blobUrl = typeof formData.get("blob_url") === "string" ? String(formData.get("blob_url")).trim() : ""
     // Optional, only sent when archival is on — used to file phase-1
     // artifacts under the same per-consult container as the later note upload.
     const encounterId = typeof formData.get("encounter_id") === "string" ? String(formData.get("encounter_id")) : ""
@@ -58,26 +70,41 @@ export async function POST(req: NextRequest) {
       typeof formData.get("keyterms") === "string" ? String(formData.get("keyterms")) : "",
     )
 
-    if (typeof sessionId !== "string" || !(file instanceof Blob)) {
-      return jsonError(400, "validation_error", "Missing session_id or file", false)
+    if (typeof sessionId !== "string" || (!(file instanceof Blob) && !blobUrl)) {
+      return jsonError(400, "validation_error", "Missing session_id or audio (file or blob_url)", false)
     }
-    if (file.size === 0) {
+
+    let audio: UploadedAudio
+    if (blobUrl) {
+      stagedUrl = blobUrl
+      try {
+        audio = await readStagedAudio(blobUrl)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The staged recording could not be read"
+        return jsonError(400, "staged_audio_unavailable", message, true)
+      }
+    } else {
+      const upload = file as Blob
+      if (upload.size > MAX_UPLOAD_BYTES) {
+        return jsonError(413, "file_too_large", "Uploaded audio file exceeds the 100 MB limit", true)
+      }
+      audio = {
+        buffer: Buffer.from(await upload.arrayBuffer()),
+        contentType: upload.type || "application/octet-stream",
+        filename: upload instanceof File && upload.name ? upload.name : `${sessionId}-upload`,
+      }
+    }
+    if (audio.buffer.byteLength === 0) {
       return jsonError(400, "validation_error", "Uploaded audio file is empty", true)
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      return jsonError(413, "file_too_large", "Uploaded audio file exceeds the 100 MB limit", true)
-    }
+    const { buffer, contentType, filename } = audio
 
     transcriptionSessionStore.setStatus(sessionId, "finalizing")
-
-    const arrayBuffer = await file.arrayBuffer()
-    const contentType = file.type || "application/octet-stream"
-    const filename = file instanceof File && file.name ? file.name : `${sessionId}-upload`
 
     try {
       const resolvedProvider = resolveTranscriptionProvider()
       const startedAtMs = Date.now()
-      const detail = await transcribeWithResolvedProviderDetailed(Buffer.from(arrayBuffer), filename, resolvedProvider, {
+      const detail = await transcribeWithResolvedProviderDetailed(buffer, filename, resolvedProvider, {
         diarize: true,
         contentType,
         apiKey: keys.apiKey,
@@ -92,9 +119,9 @@ export async function POST(req: NextRequest) {
         return jsonError(422, "blank_audio", message, true)
       }
 
-      // Phase 1 of archival: upload the uploaded audio + raw Deepgram JSON +
-      // transcript from this request (which holds the bytes), so archival stays
-      // correct on serverless. Best-effort — never fails the transcription.
+      // Phase 1 of archival: upload the audio + raw Deepgram JSON + transcript
+      // from this request (which holds the bytes), so archival stays correct on
+      // serverless. Best-effort — never fails the transcription.
       // Must complete BEFORE the final transcript is pushed to the client: the
       // client triggers phase 2 (metadata manifest) on that event, and the
       // manifest lists whichever artifacts are already in the container.
@@ -108,11 +135,7 @@ export async function POST(req: NextRequest) {
               createdAt,
               transcriptText: transcript,
               rawTranscript: detail.raw,
-              audio: {
-                buffer: Buffer.from(arrayBuffer),
-                contentType: contentType || "application/octet-stream",
-                filename,
-              },
+              audio: { buffer, contentType, filename },
             })
           } catch (archiveError) {
             console.error("[archival] phase-1 archive failed (upload)", archiveError)
@@ -128,7 +151,8 @@ export async function POST(req: NextRequest) {
         success: true,
         metadata: {
           source: "file_upload",
-          file_size_bytes: arrayBuffer.byteLength,
+          audio_source: blobUrl ? "blob" : "request",
+          file_size_bytes: buffer.byteLength,
           content_type: contentType,
           transcription_provider: resolvedProvider.provider,
           transcription_model: resolvedProvider.model,
@@ -157,6 +181,7 @@ export async function POST(req: NextRequest) {
         error_message: error instanceof Error ? error.message : "Transcription API failed",
         metadata: {
           source: "file_upload",
+          audio_source: blobUrl ? "blob" : "request",
           transcription_provider: resolvedProvider.provider,
           transcription_model: resolvedProvider.model,
         },
@@ -167,5 +192,9 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Audio upload ingestion failed", error)
     return jsonError(500, "storage_error", "Failed to process uploaded audio", false)
+  } finally {
+    // Whatever the answer was, the staged copy has done its job; the browser
+    // re-stages on retry and the archive holds the durable copy.
+    if (stagedUrl) await discardStagedAudio(stagedUrl)
   }
 }

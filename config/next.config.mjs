@@ -6,7 +6,7 @@ const ContentSecurityPolicy = `
   style-src 'self' 'unsafe-inline';
   img-src 'self' data: blob:;
   font-src 'self' data:;
-  connect-src 'self' https://api.openai.com https://va.vercel-scripts.com https://vitals.vercel-insights.com;
+  connect-src 'self' https://api.openai.com https://va.vercel-scripts.com https://vitals.vercel-insights.com https://vercel.com/api/blob https://vercel.com/api/blob/;
   media-src 'self' blob:;
   frame-src 'none';
   object-src 'none';
@@ -62,6 +62,15 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+  },
+  experimental: {
+    // With a middleware/proxy file present, Next buffers every request body
+    // and truncates it at 10 MB by default; the multipart parser then fails
+    // with "expected boundary after body". Match the upload route's own cap so
+    // a self-hosted server can take a full-quality recording in the request.
+    // (On Vercel the platform's 4.5 MB limit applies first; long recordings go
+    // through the Blob store there and never hit this path.)
+    proxyClientMaxBodySize: '100mb',
   },
   output: 'standalone',
   async headers() {

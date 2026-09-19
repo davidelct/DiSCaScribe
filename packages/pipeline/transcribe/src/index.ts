@@ -16,6 +16,16 @@ export {
   type KeytermValidation,
 } from "./keyterms"
 
+// Where a recording travels on its way to the transcriber, and how big it may be.
+export {
+  DIRECT_UPLOAD_LIMIT_BYTES,
+  HOSTED_REQUEST_BODY_LIMIT_BYTES,
+  compressionTargetBytes,
+  isVercelBlobUrl,
+  resolveUploadCapability,
+  type UploadCapability,
+} from "./upload-target"
+
 // Word-level confidence, as offsets into the rendered transcript.
 export {
   DEFAULT_LOW_CONFIDENCE_THRESHOLD,

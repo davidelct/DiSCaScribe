@@ -43,16 +43,30 @@ No Cloudflare required. Everything below runs on Vercel's free Hobby plan.
    | `ANTHROPIC_API_KEY` | `sk-ant-…` | Note generation. |
    | `DEEPGRAM_API_KEY` | *your Deepgram key* | Diarized transcription. |
    | `DEEPGRAM_MODEL` | `nova-3` | Optional; transcription model. |
+   | `DEEPGRAM_DIARIZE_MODEL` | `v2` | Optional; Deepgram diarizer version (`v1`, `v2`, `latest`). |
    | `TRANSCRIPTION_PROVIDER` | `deepgram` | Cloud transcription, no local backend. |
    | `NEXT_PUBLIC_SECURE_STORAGE_KEY` | `openssl rand -base64 32` | Build-time; client storage encryption. |
+   | `BLOB_READ_WRITE_TOKEN` | *set by the Blob store* | Added automatically in step 4; lets long recordings bypass the 4.5 MB request limit. |
 
    `NODE_ENV=production` is set by Vercel automatically (needed for the secure
    cookie + HTTPS redirect).
 
-4. **Deploy.** You'll get a `*.vercel.app` URL. Visit it → you should be bounced to
+4. **Attach a Blob store** (Project → Storage → Create Database → **Blob**, access
+   **Private**, connect it to this project). This adds `BLOB_READ_WRITE_TOKEN` to
+   the project's environment variables automatically; nothing else to configure.
+
+   Why it matters: Vercel Functions reject request bodies over 4.5 MB, and without
+   a store the browser has to compress every recording to fit — a 25-minute
+   consultation goes to Deepgram as a 16 kbps MP3, and speaker diarization
+   degrades badly at that bitrate. With the store attached the browser uploads
+   the recording straight to it (any length, 64 kbps), the transcription route
+   pulls it from there and deletes it once Deepgram has answered. The store is a
+   transit lane, not an archive; the durable copy still goes to Box.
+
+5. **Deploy.** You'll get a `*.vercel.app` URL. Visit it → you should be bounced to
    `/login` → enter the password → you're in.
 
-5. **(Optional) Custom domain `scribe.disca.ai`:** Project → Domains → add it, then
+6. **(Optional) Custom domain `scribe.disca.ai`:** Project → Domains → add it, then
    create the DNS record Vercel shows (a `CNAME` to `cname.vercel-dns.com`) in the
    `disca.ai` zone. Free on Hobby.
 

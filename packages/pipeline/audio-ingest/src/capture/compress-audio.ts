@@ -2,21 +2,32 @@ import { Mp3Encoder } from "@breezystack/lamejs"
 import { TARGET_SAMPLE_RATE } from "./audio-processing"
 
 /**
- * Browser-side audio compression for file uploads.
+ * Browser-side audio compression for uploads.
  *
  * Decodes an arbitrary audio file, resamples to 16 kHz mono (plenty for speech
- * transcription), and encodes a low-bitrate MP3. This keeps the uploaded body
- * small enough for hosted serverless request-size limits (e.g. Vercel's ~4.5 MB)
- * while staying lossless enough for ASR. MP3 needs no container/muxing and is
+ * transcription), and encodes an MP3. MP3 needs no container/muxing and is
  * accepted directly by Deepgram.
+ *
+ * The bitrate is the highest standard one whose output fits `targetBytes`,
+ * capped at 64 kbps, which for 16 kHz mono speech is as good as the source.
+ * The cap matters more than it looks: with the old fixed 3.8 MB budget a
+ * 25-minute consultation went out at 16 kbps and its diarization fell apart,
+ * while a 7-minute one from the same room went out at 64 kbps and was fine.
+ * Callers that can bypass the request-size limit (see the Blob upload path in
+ * the web app) pass an effectively unlimited target and always get 64 kbps.
  */
 
-// Stay safely under the 4.5 MB hosted limit, leaving headroom for MP3 framing.
-const TARGET_SIZE_BYTES = 3.8 * 1024 * 1024
+/** Default target: safely under Vercel's 4.5 MB request-body limit, with headroom for MP3 framing. */
+export const DEFAULT_COMPRESSION_TARGET_BYTES = 3.8 * 1024 * 1024
 const STANDARD_BITRATES_KBPS = [16, 24, 32, 40, 48, 56, 64]
 const MIN_KBPS = 16
 const MAX_KBPS = 64
 const MP3_FRAME_SAMPLES = 1152
+
+export interface CompressAudioOptions {
+  /** Size the encoded file must fit in; defaults to the hosted request-body budget. */
+  targetBytes?: number
+}
 
 export interface CompressedAudio {
   blob: Blob
@@ -28,10 +39,10 @@ export interface CompressedAudio {
 }
 
 /** Largest standard MP3 bitrate whose estimated size fits the target, given duration. */
-function chooseBitrateKbps(durationSeconds: number): number {
+export function chooseBitrateKbps(durationSeconds: number, targetBytes: number = DEFAULT_COMPRESSION_TARGET_BYTES): number {
   if (durationSeconds <= 0) return 32
   // size_bytes ≈ kbps * 1000 / 8 * duration  →  kbps ≈ target * 8 / 1000 / duration
-  const maxKbps = (TARGET_SIZE_BYTES * 8) / 1000 / durationSeconds
+  const maxKbps = (targetBytes * 8) / 1000 / durationSeconds
   let chosen = MIN_KBPS
   for (const bitrate of STANDARD_BITRATES_KBPS) {
     if (bitrate <= maxKbps) chosen = bitrate
@@ -70,14 +81,14 @@ async function decodeToMono16k(file: File): Promise<{ samples: Float32Array; dur
 }
 
 /**
- * Compress an audio file to a low-bitrate 16 kHz mono MP3 suitable for upload.
+ * Compress an audio file to a 16 kHz mono MP3 that fits the target size.
  * Throws if the file cannot be decoded (caller should fall back to the original).
  */
-export async function compressAudioFileToMp3(file: File): Promise<CompressedAudio> {
+export async function compressAudioFileToMp3(file: File, options: CompressAudioOptions = {}): Promise<CompressedAudio> {
   const { samples, durationSeconds } = await decodeToMono16k(file)
   const pcm = floatToInt16(samples)
 
-  const bitrateKbps = chooseBitrateKbps(durationSeconds)
+  const bitrateKbps = chooseBitrateKbps(durationSeconds, options.targetBytes ?? DEFAULT_COMPRESSION_TARGET_BYTES)
   const encoder = new Mp3Encoder(1, TARGET_SAMPLE_RATE, bitrateKbps)
   const chunks: Uint8Array[] = []
 

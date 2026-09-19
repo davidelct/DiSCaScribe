@@ -1,6 +1,6 @@
 export { useAudioRecorder } from "./capture/use-audio-recorder"
 export type { RecordedSegment } from "./capture/use-audio-recorder"
-export { compressAudioFileToMp3 } from "./capture/compress-audio"
-export type { CompressedAudio } from "./capture/compress-audio"
+export { compressAudioFileToMp3, chooseBitrateKbps, DEFAULT_COMPRESSION_TARGET_BYTES } from "./capture/compress-audio"
+export type { CompressedAudio, CompressAudioOptions } from "./capture/compress-audio"
 export { toAudioIngestError } from "./errors"
 export { warmupMicrophonePermission } from "./devices/mic-permission"
