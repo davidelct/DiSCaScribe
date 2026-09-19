@@ -40,7 +40,10 @@ test("deepgram transcriber formats diarized utterances with speaker labels", asy
     text,
     "Speaker 0: Hello. What brings you in today?\nSpeaker 1: I have a headache.\nSpeaker 0: How long?",
   )
-  assert.match(requestUrl, /diarize=true/)
+  // Diarization is requested by pinning a diarizer, never with the deprecated
+  // `diarize=true` flag (which routes to the v1 diarizer).
+  assert.match(requestUrl, /diarize_model=v2/)
+  assert.doesNotMatch(requestUrl, /[?&]diarize=/)
   assert.match(requestUrl, /utterances=true/)
 })
 

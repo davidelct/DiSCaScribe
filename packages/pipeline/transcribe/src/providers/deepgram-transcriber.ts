@@ -5,22 +5,51 @@ import type { TranscriptWordSpan } from "../../../shared/src/transcript"
  * Deepgram Transcriber
  *
  * Transcribes audio using Deepgram's pre-recorded ("upload audio") REST endpoint.
- * The full WAV buffer is POSTed as the request body and Deepgram returns a JSON
+ * The full audio buffer is POSTed as the request body and Deepgram returns a JSON
  * transcript. Speaker diarization is supported via `diarize`: when enabled, the
- * transcript is rendered with `Speaker N:` labels grouped by speaker.
+ * request pins a diarizer with `diarize_model` and the transcript is rendered
+ * with `Speaker N:` labels, one line per speaker turn.
+ *
+ * Turns are cut at word-level speaker changes, not at utterance boundaries.
+ * Deepgram's utterance `speaker` is a single label for the whole utterance, and
+ * on two consultations (v1 and v2 diarizers alike) 6–17% of words sat inside an
+ * utterance labelled with the other speaker — almost always a short answer
+ * ("Yes." / "Nope.") glued onto the question before it. Re-cutting the same
+ * response at word level took speaker accuracy from 92.7% to 97.5% against a
+ * hand-labelled reference; see formatDiarizedTranscript.
  *
  * Docs: https://developers.deepgram.com/reference/speech-to-text-api/listen
+ *       https://developers.deepgram.com/docs/diarization
  */
 
 const DEFAULT_DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
 const DEFAULT_DEEPGRAM_MODEL = "nova-3"
 const DEFAULT_DEEPGRAM_LANGUAGE = "en"
+/**
+ * Pinned rather than "latest": the app backs a reasoning study, and a diarizer
+ * that changes under it mid-study would change the transcripts it compares.
+ * Bump deliberately, with DEEPGRAM_DIARIZE_MODEL, after re-running the check
+ * described above.
+ */
+const DEFAULT_DEEPGRAM_DIARIZE_MODEL = "v2"
+/**
+ * A run of at most this many words, with no sentence-ending punctuation, that
+ * the diarizer attributes to a different speaker than both its neighbours is
+ * treated as jitter and folded into the sentence it sits in. Real one-word
+ * answers ("Yeah.", "No.") carry punctuation and are left alone.
+ */
+const SHORT_RUN_MAX_WORDS = 3
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_RETRIES = 2
 
 export interface DeepgramTranscriberOptions {
-  /** Render the transcript with `Speaker N:` labels grouped by speaker. */
+  /** Render the transcript with `Speaker N:` labels, one line per speaker turn. */
   diarize?: boolean
+  /**
+   * Deepgram diarizer version, sent as `diarize_model` ("v1", "v2", "latest").
+   * Defaults to DEEPGRAM_DIARIZE_MODEL, else v2.
+   */
+  diarizeModel?: string
   model?: string
   language?: string
   apiKey?: string
@@ -43,6 +72,10 @@ interface DeepgramWord {
   /** The word as it appears in the transcript once smart_format/punctuate ran. */
   punctuated_word?: string
   confidence?: number
+  /** Speaker label for this word when diarization is on. */
+  speaker?: number
+  /** Deepgram's confidence in that label, pre-recorded audio only. */
+  speaker_confidence?: number
 }
 
 interface DeepgramUtterance {
@@ -132,35 +165,57 @@ function findToken(text: string, token: string, from: number): number {
   return text.indexOf(token, from)
 }
 
+/** A word's character range within the text it was located in. */
+interface WordPosition {
+  start: number
+  end: number
+}
+
 /**
- * Locate each word within the text Deepgram rendered for it, returning spans
- * offset by `baseOffset` (the text's position in the full transcript).
+ * Locate each word within the text Deepgram rendered for it. One entry per
+ * word, in order; null where the word could not be found.
  *
  * Deepgram lists words in order, so a monotonic cursor keeps repeated words
  * distinct. smart_format can rewrite a word between the `words` array and the
- * transcript ("eight" → "8"); those are skipped rather than mis-marked, which
- * costs a mark but never attaches a confidence to the wrong text.
+ * transcript ("eight" → "8"); those come back null rather than mis-located,
+ * which costs a mark but never attaches a confidence to the wrong text.
  */
-function locateWords(text: string, words: DeepgramWord[], baseOffset: number): TranscriptWordSpan[] {
-  const spans: TranscriptWordSpan[] = []
+function locateWords(text: string, words: DeepgramWord[]): Array<WordPosition | null> {
+  const positions: Array<WordPosition | null> = []
   let cursor = 0
 
   for (const word of words) {
-    if (typeof word.confidence !== "number") continue
     const token = (word.punctuated_word || word.word || "").trim()
-    if (!token) continue
+    if (!token) {
+      positions.push(null)
+      continue
+    }
 
     const index = findToken(text, token, cursor)
-    if (index === -1) continue
+    if (index === -1) {
+      positions.push(null)
+      continue
+    }
 
-    spans.push({
-      start: baseOffset + index,
-      end: baseOffset + index + token.length,
-      confidence: word.confidence,
-    })
+    positions.push({ start: index, end: index + token.length })
     cursor = index + token.length
   }
 
+  return positions
+}
+
+/** Confidence spans for the located words, as offsets into the full transcript. */
+function confidenceSpans(
+  words: DeepgramWord[],
+  positions: Array<WordPosition | null>,
+  baseOffset: number,
+): TranscriptWordSpan[] {
+  const spans: TranscriptWordSpan[] = []
+  words.forEach((word, index) => {
+    const position = positions[index]
+    if (!position || typeof word.confidence !== "number") return
+    spans.push({ start: baseOffset + position.start, end: baseOffset + position.end, confidence: word.confidence })
+  })
   return spans
 }
 
@@ -171,47 +226,151 @@ interface TranscriptWithSpans {
 }
 
 /**
- * Build a transcript with `Speaker N:` labels from Deepgram utterances, merging
- * consecutive utterances spoken by the same speaker into a single line.
+ * A stretch of one utterance's text spoken by one speaker, with its located
+ * words (offsets relative to `text`).
+ */
+interface SpeakerPiece {
+  speaker: number
+  text: string
+  words: DeepgramWord[]
+  positions: Array<WordPosition | null>
+  wordCount: number
+}
+
+function endsSentence(text: string): boolean {
+  return /[.?!]["')\]]*$/.test(text)
+}
+
+/**
+ * Cut one utterance into pieces at word-level speaker changes.
  *
- * Confidence spans are collected while the string is assembled — the merge
- * means utterances and rendered lines aren't 1:1, so offsets can't be
- * reconstructed by re-parsing the result afterwards.
+ * The utterance text is sliced, not rebuilt from the words, so smart_format's
+ * rendering survives untouched. A cut lands at the start of the first located
+ * word of the new speaker; the whitespace before it stays with the earlier
+ * piece and is trimmed. A word that could not be located cannot host a cut,
+ * so a change there takes effect at the next word that can.
+ */
+function cutUtterance(utterance: DeepgramUtterance): SpeakerPiece[] {
+  const text = utterance.transcript?.trim() ?? ""
+  if (!text) return []
+  const fallbackSpeaker = typeof utterance.speaker === "number" ? utterance.speaker : 0
+  const words = utterance.words ?? []
+  if (words.length === 0) {
+    return [{ speaker: fallbackSpeaker, text, words: [], positions: [], wordCount: text.split(/\s+/).length }]
+  }
+
+  const positions = locateWords(text, words)
+  const speakerOf = (word: DeepgramWord) => (typeof word.speaker === "number" ? word.speaker : fallbackSpeaker)
+
+  const pieces: SpeakerPiece[] = []
+  let pieceStart = 0
+  let pieceFirstWord = 0
+  let pieceSpeaker = speakerOf(words[0])
+  let pendingSpeaker: number | null = null
+
+  const close = (endOffset: number, endWord: number) => {
+    const pieceText = text.slice(pieceStart, endOffset).trimEnd()
+    const pieceWords = words.slice(pieceFirstWord, endWord)
+    const piecePositions = positions
+      .slice(pieceFirstWord, endWord)
+      .map((position) => (position ? { start: position.start - pieceStart, end: position.end - pieceStart } : null))
+    if (pieceText) {
+      pieces.push({
+        speaker: pieceSpeaker,
+        text: pieceText,
+        words: pieceWords,
+        positions: piecePositions,
+        wordCount: pieceWords.length,
+      })
+    }
+  }
+
+  for (let index = 1; index < words.length; index += 1) {
+    const speaker = speakerOf(words[index])
+    if (speaker !== pieceSpeaker) pendingSpeaker = speaker
+    else if (pendingSpeaker !== null && speaker === pieceSpeaker) pendingSpeaker = null
+    const position = positions[index]
+    if (pendingSpeaker === null || !position) continue
+
+    close(position.start, index)
+    pieceStart = position.start
+    pieceFirstWord = index
+    pieceSpeaker = pendingSpeaker
+    pendingSpeaker = null
+  }
+  close(text.length, words.length)
+
+  return pieces
+}
+
+/** Consecutive pieces by one speaker, before rendering as a `Speaker N:` line. */
+interface SpeakerRun {
+  speaker: number
+  pieces: SpeakerPiece[]
+  wordCount: number
+  endsSentence: boolean
+}
+
+function appendToRun(run: SpeakerRun, piece: SpeakerPiece): void {
+  run.pieces.push(piece)
+  run.wordCount += piece.wordCount
+  run.endsSentence = endsSentence(piece.text)
+}
+
+/**
+ * Group pieces into speaker runs, folding diarizer jitter: a short run with no
+ * sentence-ending punctuation, sandwiched between other speakers, belongs to
+ * the sentence it interrupts — the one before it, or the one after when the
+ * previous run already ended a sentence ("months. | Have you | ever…").
+ */
+function groupIntoRuns(pieces: SpeakerPiece[]): SpeakerRun[] {
+  const runs: SpeakerRun[] = []
+  for (const piece of pieces) {
+    const last = runs[runs.length - 1]
+    if (last && last.speaker === piece.speaker) appendToRun(last, piece)
+    else runs.push({ speaker: piece.speaker, pieces: [piece], wordCount: piece.wordCount, endsSentence: endsSentence(piece.text) })
+  }
+
+  const smoothed: SpeakerRun[] = []
+  runs.forEach((run, index) => {
+    const previous = smoothed[smoothed.length - 1]
+    if (previous && run.wordCount <= SHORT_RUN_MAX_WORDS && !run.endsSentence) {
+      const next = runs[index + 1]
+      run.speaker = previous.endsSentence && next ? next.speaker : previous.speaker
+    }
+    if (previous && previous.speaker === run.speaker) {
+      for (const piece of run.pieces) appendToRun(previous, piece)
+    } else {
+      smoothed.push(run)
+    }
+  })
+  return smoothed
+}
+
+/**
+ * Build a transcript with `Speaker N:` labels from Deepgram utterances, one
+ * line per speaker turn, turns cut at word-level speaker changes.
+ *
+ * Confidence spans are collected while the string is assembled — pieces and
+ * rendered lines aren't 1:1, so offsets can't be reconstructed by re-parsing
+ * the result afterwards.
  */
 function formatDiarizedTranscript(utterances: DeepgramUtterance[]): TranscriptWithSpans {
+  const pieces = utterances.flatMap(cutUtterance)
+  const runs = groupIntoRuns(pieces)
+
   const spans: TranscriptWordSpan[] = []
   let text = ""
-  let currentSpeaker: number | null = null
-  let run: DeepgramUtterance[] = []
-
-  const flush = () => {
-    if (run.length === 0) return
+  for (const run of runs) {
     if (text) text += "\n"
-    text += `Speaker ${currentSpeaker ?? 0}: `
-
-    run.forEach((utterance, index) => {
+    text += `Speaker ${run.speaker}: `
+    run.pieces.forEach((piece, index) => {
       if (index > 0) text += " "
-      const utteranceText = utterance.transcript?.trim() ?? ""
       const baseOffset = text.length
-      text += utteranceText
-      if (utterance.words?.length) {
-        spans.push(...locateWords(utteranceText, utterance.words, baseOffset))
-      }
+      text += piece.text
+      spans.push(...confidenceSpans(piece.words, piece.positions, baseOffset))
     })
-
-    run = []
   }
-
-  for (const utterance of utterances) {
-    if (!utterance.transcript?.trim()) continue
-    const speaker = typeof utterance.speaker === "number" ? utterance.speaker : 0
-    if (speaker !== currentSpeaker) {
-      flush()
-      currentSpeaker = speaker
-    }
-    run.push(utterance)
-  }
-  flush()
 
   return { text, spans }
 }
@@ -225,7 +384,8 @@ function extractTranscript(result: DeepgramResponse, diarize: boolean): Transcri
 
   const alternative = result.results?.channels?.[0]?.alternatives?.[0]
   const text = alternative?.transcript?.trim() ?? ""
-  const spans = text && alternative?.words?.length ? locateWords(text, alternative.words, 0) : []
+  const words = alternative?.words ?? []
+  const spans = text && words.length ? confidenceSpans(words, locateWords(text, words), 0) : []
   return { text, spans }
 }
 
@@ -248,6 +408,7 @@ async function requestDeepgram(
   const model = options?.model || process.env.DEEPGRAM_MODEL || DEFAULT_DEEPGRAM_MODEL
   const language = options?.language || process.env.DEEPGRAM_LANGUAGE || DEFAULT_DEEPGRAM_LANGUAGE
   const diarize = options?.diarize ?? false
+  const diarizeModel = options?.diarizeModel || process.env.DEEPGRAM_DIARIZE_MODEL || DEFAULT_DEEPGRAM_DIARIZE_MODEL
   const contentType = options?.contentType || "audio/wav"
   const timeoutMs = options?.timeoutMs ?? resolvePositiveInteger(process.env.DEEPGRAM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)
   const maxRetries = options?.maxRetries ?? resolvePositiveInteger(process.env.DEEPGRAM_MAX_RETRIES, DEFAULT_MAX_RETRIES)
@@ -275,7 +436,11 @@ async function requestDeepgram(
   url.searchParams.set("smart_format", "true")
   url.searchParams.set("punctuate", "true")
   if (diarize) {
-    url.searchParams.set("diarize", "true")
+    // `diarize_model` both turns diarization on and pins the diarizer. The
+    // older `diarize=true` flag is deprecated and always routes to the v1
+    // diarizer, and Deepgram rejects a request that carries both.
+    url.searchParams.set("diarize_model", diarizeModel)
+    // Utterances carry the per-word speaker labels the turns are cut from.
     url.searchParams.set("utterances", "true")
   }
   // Repeated rather than delimited, so each term is processed individually.

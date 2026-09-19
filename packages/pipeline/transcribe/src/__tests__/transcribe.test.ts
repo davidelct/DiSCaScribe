@@ -536,3 +536,222 @@ test("no keyterm param is sent when the vocabulary is empty", async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+// ---------------------------------------------------------------------------
+// Speaker turns cut at word-level speaker changes.
+// ---------------------------------------------------------------------------
+
+/** A Deepgram word with the fields the turn cutter reads. */
+function spokenWord(punctuated: string, speaker: number, confidence = 0.99) {
+  return { word: punctuated.replace(/[^A-Za-z0-9']/g, "").toLowerCase(), punctuated_word: punctuated, confidence, speaker }
+}
+
+function stubDeepgram(response: unknown): () => void {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalFetch = globalThis.fetch
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  globalThis.fetch = (async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch
+  return () => {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    globalThis.fetch = originalFetch
+  }
+}
+
+test("diarization pins a diarizer with diarize_model, not the deprecated diarize flag", async () => {
+  const originalKey = process.env.DEEPGRAM_API_KEY
+  const originalDiarizeModel = process.env.DEEPGRAM_DIARIZE_MODEL
+  const originalFetch = globalThis.fetch
+
+  process.env.DEEPGRAM_API_KEY = "dg-test-key"
+  delete process.env.DEEPGRAM_DIARIZE_MODEL
+  let capturedUrl = ""
+  globalThis.fetch = (async (url) => {
+    capturedUrl = String(url)
+    return new Response(
+      JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: "ok" }] }] } }),
+      { status: 200 },
+    )
+  }) as typeof fetch
+
+  try {
+    await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    let params = new URL(capturedUrl).searchParams
+    assert.equal(params.get("diarize_model"), "v2")
+    // `diarize=true` always routes to the v1 diarizer, and Deepgram rejects a
+    // request carrying both parameters.
+    assert.equal(params.has("diarize"), false)
+    assert.equal(params.get("utterances"), "true")
+
+    process.env.DEEPGRAM_DIARIZE_MODEL = "latest"
+    await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    assert.equal(new URL(capturedUrl).searchParams.get("diarize_model"), "latest")
+
+    await transcribeWavBuffer(Buffer.from([1, 2, 3]), "clip.wav", { diarize: false })
+    params = new URL(capturedUrl).searchParams
+    assert.equal(params.has("diarize_model"), false)
+    assert.equal(params.has("utterances"), false)
+  } finally {
+    process.env.DEEPGRAM_API_KEY = originalKey
+    if (originalDiarizeModel === undefined) delete process.env.DEEPGRAM_DIARIZE_MODEL
+    else process.env.DEEPGRAM_DIARIZE_MODEL = originalDiarizeModel
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("a speaker change inside an utterance starts a new turn at that word", async () => {
+  // Deepgram labelled both utterances speaker 0, but the words say the patient
+  // answered inside the first and opened the second — the "Yes." glued onto the
+  // question that the utterance label hides.
+  const restore = stubDeepgram({
+    results: {
+      channels: [{ alternatives: [{ transcript: "Is it miss Claire Morgan? That's right. Yeah. How can I help?" }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "Is it miss Claire Morgan? That's right.",
+          words: [
+            spokenWord("Is", 0),
+            spokenWord("it", 0),
+            spokenWord("miss", 0),
+            spokenWord("Claire", 0, 0.9),
+            spokenWord("Morgan?", 0, 0.95),
+            spokenWord("That's", 1, 0.97),
+            spokenWord("right.", 1, 0.5),
+          ],
+        },
+        {
+          speaker: 0,
+          transcript: "Yeah. How can I help?",
+          words: [spokenWord("Yeah.", 1, 0.9), spokenWord("How", 0), spokenWord("can", 0), spokenWord("I", 0), spokenWord("help?", 0)],
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+
+    // "Yeah." is a one-word turn with its own punctuation: a real answer, kept,
+    // and joined to the patient's previous words across the utterance boundary.
+    assert.equal(result.text, "Speaker 0: Is it miss Claire Morgan?\nSpeaker 1: That's right. Yeah.\nSpeaker 0: How can I help?")
+
+    // Spans follow the words to their new lines.
+    assert.deepEqual(
+      result.words.map((span) => result.text.slice(span.start, span.end)),
+      ["Is", "it", "miss", "Claire", "Morgan?", "That's", "right.", "Yeah.", "How", "can", "I", "help?"],
+    )
+    const uncertain = result.words.filter((span) => span.confidence < 0.6)
+    assert.deepEqual(
+      uncertain.map((span) => result.text.slice(span.start, span.end)),
+      ["right."],
+    )
+  } finally {
+    restore()
+  }
+})
+
+test("a short unpunctuated run between two speakers is folded into the sentence it opens", async () => {
+  // The diarizer gave "Have you" to a third speaker label at speaker_confidence
+  // 0.00 before handing the rest of the question to the clinician. The turn
+  // before it ended a sentence, so the fragment belongs to what follows.
+  const restore = stubDeepgram({
+    results: {
+      channels: [{ alternatives: [{ transcript: "It's built up over five months. Have you ever seen this before?" }] }],
+      utterances: [
+        {
+          speaker: 1,
+          transcript: "It's built up over five months.",
+          words: ["It's", "built", "up", "over", "five", "months."].map((word) => spokenWord(word, 1)),
+        },
+        {
+          speaker: 0,
+          transcript: "Have you ever seen this before?",
+          words: [
+            spokenWord("Have", 2),
+            spokenWord("you", 2),
+            spokenWord("ever", 0),
+            spokenWord("seen", 0),
+            spokenWord("this", 0),
+            spokenWord("before?", 0),
+          ],
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    assert.equal(result.text, "Speaker 1: It's built up over five months.\nSpeaker 0: Have you ever seen this before?")
+    assert.deepEqual(
+      result.words.map((span) => result.text.slice(span.start, span.end)),
+      ["It's", "built", "up", "over", "five", "months.", "Have", "you", "ever", "seen", "this", "before?"],
+    )
+  } finally {
+    restore()
+  }
+})
+
+test("a short unpunctuated run inside a sentence is folded back into it", async () => {
+  const restore = stubDeepgram({
+    results: {
+      channels: [{ alternatives: [{ transcript: "I was thinking about it later." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "I was thinking about it later.",
+          words: [
+            spokenWord("I", 0),
+            spokenWord("was", 0),
+            spokenWord("thinking", 0),
+            spokenWord("about", 1),
+            spokenWord("it", 0),
+            spokenWord("later.", 0),
+          ],
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    assert.equal(result.text, "Speaker 0: I was thinking about it later.")
+    assert.equal(result.words.length, 6)
+  } finally {
+    restore()
+  }
+})
+
+test("a longer interjection keeps its speaker even without punctuation", async () => {
+  // Four unpunctuated words is past the jitter threshold: an interruption the
+  // transcript should show, not smooth away.
+  const restore = stubDeepgram({
+    results: {
+      channels: [{ alternatives: [{ transcript: "So the tablets sorry can I just say are working." }] }],
+      utterances: [
+        {
+          speaker: 0,
+          transcript: "So the tablets sorry can I just say are working.",
+          words: [
+            spokenWord("So", 0),
+            spokenWord("the", 0),
+            spokenWord("tablets", 0),
+            spokenWord("sorry", 1),
+            spokenWord("can", 1),
+            spokenWord("I", 1),
+            spokenWord("just", 1),
+            spokenWord("say", 1),
+            spokenWord("are", 0),
+            spokenWord("working.", 0),
+          ],
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await transcribeWavBufferDetailed(Buffer.from([1, 2, 3]), "clip.wav", { diarize: true })
+    assert.equal(result.text, "Speaker 0: So the tablets\nSpeaker 1: sorry can I just say\nSpeaker 0: are working.")
+  } finally {
+    restore()
+  }
+})
