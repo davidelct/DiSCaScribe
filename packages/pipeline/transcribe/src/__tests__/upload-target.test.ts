@@ -17,9 +17,13 @@ test("on Vercel without a Blob store the browser must fit the 4.5 MB request lim
 })
 
 test("a Blob store lifts the size budget entirely", () => {
-  const capability = resolveUploadCapability({ VERCEL: "1", BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x" })
-  assert.equal(capability.blob, true)
-  assert.equal(compressionTargetBytes(capability), Number.POSITIVE_INFINITY)
+  // Connected on Vercel: OIDC, so only the store id is in the environment.
+  const oidc = resolveUploadCapability({ VERCEL: "1", BLOB_STORE_ID: "store_abc123" })
+  assert.equal(oidc.blob, true)
+  assert.equal(compressionTargetBytes(oidc), Number.POSITIVE_INFINITY)
+  // Off Vercel with a static read-write token.
+  const token = resolveUploadCapability({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x" })
+  assert.equal(token.blob, true)
 })
 
 test("off Vercel only the route's own cap applies", () => {
@@ -28,8 +32,8 @@ test("off Vercel only the route's own cap applies", () => {
   assert(compressionTargetBytes(capability) > 80 * 1024 * 1024)
 })
 
-test("a blank token does not count as a Blob store", () => {
-  assert.equal(resolveUploadCapability({ BLOB_READ_WRITE_TOKEN: "   " }).blob, false)
+test("blank credentials do not count as a Blob store", () => {
+  assert.equal(resolveUploadCapability({ BLOB_READ_WRITE_TOKEN: "   ", BLOB_STORE_ID: "" }).blob, false)
 })
 
 test("only URLs the Blob SDK could have issued are accepted as staged audio", () => {

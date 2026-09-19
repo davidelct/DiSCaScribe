@@ -30,9 +30,15 @@ export interface UploadCapability {
   directMaxBytes: number
 }
 
-/** The capability of the server described by `env`; the browser asks for this before uploading. */
+/**
+ * The capability of the server described by `env`; the browser asks for this
+ * before uploading. A store connected to a Vercel project authenticates with
+ * OIDC and shows up as BLOB_STORE_ID alone (the token itself arrives with each
+ * function request); a static BLOB_READ_WRITE_TOKEN is what a server outside
+ * Vercel would carry. Either means there is a store to stage into.
+ */
 export function resolveUploadCapability(env: Record<string, string | undefined>): UploadCapability {
-  const blob = Boolean(env.BLOB_READ_WRITE_TOKEN?.trim())
+  const blob = Boolean(env.BLOB_STORE_ID?.trim() || env.BLOB_READ_WRITE_TOKEN?.trim())
   // Vercel sets VERCEL=1 in every function; anything else has only our own cap.
   const hosted = env.VERCEL === "1"
   return { blob, directMaxBytes: hosted ? HOSTED_REQUEST_BODY_LIMIT_BYTES : DIRECT_UPLOAD_LIMIT_BYTES }

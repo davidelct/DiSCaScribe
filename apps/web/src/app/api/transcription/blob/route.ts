@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client"
+import { issueSignedToken } from "@vercel/blob"
+import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client"
 import { resolveUploadCapability } from "@transcription"
 import { requestSessionRole } from "@/lib/request-keys"
 
@@ -33,14 +34,20 @@ function jsonError(status: number, code: string, message: string) {
 
 /**
  * Which upload path the browser should take: straight to the Blob store when
- * one is attached, otherwise in the request body within the advertised limit.
+ * one is connected, otherwise in the request body within the advertised limit.
  */
 export async function GET() {
   return NextResponse.json(resolveUploadCapability(process.env))
 }
 
 /**
- * Token exchange for a browser → Blob upload (the `handleUpload` protocol).
+ * Presigned-URL issuance for a browser → Blob upload (the SDK's
+ * `handleUploadPresigned` protocol). The short-lived token is minted with
+ * `issueSignedToken`, which authenticates the way the rest of the SDK does:
+ * OIDC on Vercel (BLOB_STORE_ID plus the token Vercel attaches to each
+ * function request), or a static BLOB_READ_WRITE_TOKEN on a server elsewhere.
+ * No long-lived secret reaches the browser; the presigned URL carries the
+ * content-type, size and pathname constraints and the CDN enforces them.
  *
  * There is deliberately no `onUploadCompleted`: the browser hands the blob URL
  * to the transcription route itself, and that route deletes the blob once it
@@ -54,33 +61,44 @@ export async function POST(req: Request) {
     return jsonError(503, "blob_not_configured", "Large uploads are not configured on this server.")
   }
 
-  let body: HandleUploadBody
+  let body: HandleUploadPresignedBody
   try {
-    body = (await req.json()) as HandleUploadBody
+    body = (await req.json()) as HandleUploadPresignedBody
   } catch {
     return jsonError(400, "validation_error", "Malformed upload request")
   }
 
   try {
-    const result = await handleUpload({
+    const result = await handleUploadPresigned({
       body,
       request: req,
-      onBeforeGenerateToken: async (pathname) => {
+      getSignedToken: async (pathname) => {
         if (!pathname.startsWith(STAGING_PREFIX)) {
           throw new Error(`Recordings must be staged under ${STAGING_PREFIX}`)
         }
-        return {
+        const validUntil = Date.now() + TOKEN_TTL_MS
+        const token = await issueSignedToken({
+          pathname,
+          operations: ["put"],
           allowedContentTypes: ALLOWED_AUDIO_TYPES,
           maximumSizeInBytes: MAX_STAGED_BYTES,
-          addRandomSuffix: true,
-          validUntil: Date.now() + TOKEN_TTL_MS,
-          tokenPayload: JSON.stringify({ role }),
+          validUntil,
+        })
+        return {
+          token,
+          urlOptions: {
+            allowedContentTypes: ALLOWED_AUDIO_TYPES,
+            maximumSizeInBytes: MAX_STAGED_BYTES,
+            validUntil,
+            addRandomSuffix: true,
+            allowOverwrite: false,
+          },
         }
       },
     })
     return NextResponse.json(result)
   } catch (error) {
-    console.error("[blob] client token request failed", error)
+    console.error("[blob] presigned upload request failed", error)
     return jsonError(400, "blob_token_error", error instanceof Error ? error.message : "Could not prepare the upload")
   }
 }

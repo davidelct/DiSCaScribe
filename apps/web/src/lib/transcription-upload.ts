@@ -3,13 +3,14 @@
  *
  * On Vercel a request body is capped at 4.5 MB, which used to dictate the
  * bitrate of every recording (a 25-minute consultation went out at 16 kbps).
- * The server now advertises whether a Blob store is attached; when it is, the
- * browser uploads the audio straight to the store, any size, and passes the
- * route a URL instead of the bytes. Without a store the file still rides in
- * the request, compressed to whatever limit the server reports.
+ * The server now advertises whether a Blob store is connected; when it is, the
+ * browser fetches a presigned URL from our token route and uploads the audio
+ * straight to the store, any size, then passes the transcription route a URL
+ * instead of the bytes. Without a store the file still rides in the request,
+ * compressed to whatever limit the server reports.
  */
 
-import { upload } from "@vercel/blob/client"
+import { uploadPresigned } from "@vercel/blob/client"
 import { compressAudioFileToMp3 } from "@audio"
 import { HOSTED_REQUEST_BODY_LIMIT_BYTES, compressionTargetBytes, type UploadCapability } from "@transcription"
 import { debugLog, debugWarn } from "@storage"
@@ -72,7 +73,7 @@ export type AudioSource = { kind: "file"; file: File } | { kind: "blob"; url: st
 export async function stageAudio(file: File, capability: UploadCapability, baseUrl: string): Promise<AudioSource> {
   if (!capability.blob) return { kind: "file", file }
   try {
-    const staged = await upload(`recordings/${file.name || "recording"}`, file, {
+    const staged = await uploadPresigned(`recordings/${file.name || "recording"}`, file, {
       access: "private",
       handleUploadUrl: transcriptionApiUrl(baseUrl, CAPABILITY_PATH),
       contentType: file.type || "application/octet-stream",

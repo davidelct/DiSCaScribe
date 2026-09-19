@@ -46,14 +46,16 @@ No Cloudflare required. Everything below runs on Vercel's free Hobby plan.
    | `DEEPGRAM_DIARIZE_MODEL` | `v2` | Optional; Deepgram diarizer version (`v1`, `v2`, `latest`). |
    | `TRANSCRIPTION_PROVIDER` | `deepgram` | Cloud transcription, no local backend. |
    | `NEXT_PUBLIC_SECURE_STORAGE_KEY` | `openssl rand -base64 32` | Build-time; client storage encryption. |
-   | `BLOB_READ_WRITE_TOKEN` | *set by the Blob store* | Added automatically in step 4; lets long recordings bypass the 4.5 MB request limit. |
+   | `BLOB_STORE_ID` | *set by the Blob store* | Added automatically in step 4; lets long recordings bypass the 4.5 MB request limit. |
 
    `NODE_ENV=production` is set by Vercel automatically (needed for the secure
    cookie + HTTPS redirect).
 
 4. **Attach a Blob store** (Project → Storage → Create Database → **Blob**, access
-   **Private**, connect it to this project). This adds `BLOB_READ_WRITE_TOKEN` to
-   the project's environment variables automatically; nothing else to configure.
+   **Private**, region near the users, connect it to this project). Vercel adds
+   `BLOB_STORE_ID` and `BLOB_WEBHOOK_PUBLIC_KEY` to the project automatically and
+   the functions authenticate to the store with OIDC; there is no secret to copy.
+   Redeploy once so the running deployment sees the new variables.
 
    Why it matters: Vercel Functions reject request bodies over 4.5 MB, and without
    a store the browser has to compress every recording to fit — a 25-minute
