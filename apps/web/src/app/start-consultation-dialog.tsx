@@ -190,7 +190,7 @@ export function useLaunchConsultation() {
         transcript_text: "",
         mode: getPreferences().encounterMode || "scribed",
       })
-      setConsultationIntent(encounter.id, intent)
+      await setConsultationIntent(encounter.id, intent)
       router.push(`/consultations/${encounter.id}`)
     } finally {
       setStarting(false)

@@ -32,7 +32,7 @@ import { NoteEditor } from "@note-rendering"
 import { useAudioRecorder, type RecordedSegment, warmupMicrophonePermission } from "@audio"
 import { formatKeyterms, resolveKeyterms, useSegmentUpload, type UploadCapability, type UploadError } from "@transcription"
 import { detectRecallExchanges, generateClinicalNote } from "@/app/actions"
-import { takeConsultationIntent } from "@/lib/consultation-intent"
+import { peekConsultationIntent, takeConsultationIntent } from "@/lib/consultation-intent"
 import {
   appendAudioSource,
   compressForUpload,
@@ -1010,19 +1010,29 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
 
   // Dispatch the launch intent chosen in the chart's start dialog (record now,
   // or transcribe an uploaded file) once the encounter has loaded. The intent
-  // store is module memory: after a hard refresh there is none and the ready
-  // panel takes over.
+  // survives a full page load (see consultation-intent.ts), so an upload's
+  // file may have to come back from the audio store: the ready panel is held
+  // back while it does, rather than flashing "Ready to record" at a clinician
+  // who has already chosen a file.
   const intentDispatchedRef = useRef(false)
   useEffect(() => {
     if (!encounter || intentDispatchedRef.current) return
-    const intent = takeConsultationIntent(encounter.id)
-    if (!intent) return
+    const pending = peekConsultationIntent(encounter.id)
+    if (!pending) return
     intentDispatchedRef.current = true
-    if (intent.action === "record") {
-      void handleStartRecording()
-    } else {
-      void handleUploadRecording(intent.file)
-    }
+    if (pending === "upload") setLive("processing")
+    void (async () => {
+      const intent = await takeConsultationIntent(encounter.id)
+      if (!intent) {
+        setLive(null)
+        return
+      }
+      if (intent.action === "record") {
+        void handleStartRecording()
+      } else {
+        void handleUploadRecording(intent.file)
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encounter?.id])
 
