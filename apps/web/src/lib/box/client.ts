@@ -193,6 +193,45 @@ export class BoxClient {
     return map
   }
 
+  /** Every direct subfolder of `folderId`, following Box's offset pagination. */
+  async listSubfolders(folderId: string): Promise<BoxFileRef[]> {
+    const folders: BoxFileRef[] = []
+    const limit = 1000
+    for (let offset = 0; ; offset += limit) {
+      const res = await this.apiJson(
+        `${API_BASE}/folders/${folderId}/items?fields=id,name,type&limit=${limit}&offset=${offset}`,
+        { method: "GET" },
+      )
+      if (!res.ok) {
+        throw new BoxApiError(`Box folder listing failed (${res.status})`, res.status, await res.text())
+      }
+      const json = (await res.json()) as {
+        entries?: Array<{ id: string; name: string; type: string }>
+        total_count?: number
+      }
+      const entries = json.entries ?? []
+      for (const entry of entries) {
+        if (entry.type === "folder") folders.push({ id: entry.id, name: entry.name })
+      }
+      if (entries.length < limit || offset + limit >= (json.total_count ?? 0)) return folders
+    }
+  }
+
+  /**
+   * Download a file's content. Box answers with a redirect to its download
+   * host, which fetch follows; a Range header is passed through so audio can
+   * be streamed and seeked.
+   */
+  async downloadFile(fileId: string, range?: string): Promise<Response> {
+    const res = await fetch(`${API_BASE}/files/${fileId}/content`, {
+      headers: { ...(await this.authHeader()), ...(range ? { Range: range } : {}) },
+    })
+    if (!res.ok) {
+      throw new BoxApiError(`Box download failed for file ${fileId} (${res.status})`, res.status, await res.text())
+    }
+    return res
+  }
+
   /**
    * Upload a file into `folderId`, choosing simple vs chunked by size. When
    * `existingFileId` is provided the bytes are written as a new version of that

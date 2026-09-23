@@ -41,4 +41,10 @@ export interface StorageClient {
     contentType: string,
     existingId?: string,
   ): Promise<StorageFileRef>
+
+  /** Every per-consult container under the archive root, for recovery. */
+  listContainers(): Promise<StorageFileRef[]>
+
+  /** A file's bytes as a fetch Response; `range` is an HTTP Range header value. */
+  downloadFile(fileId: string, range?: string): Promise<Response>
 }

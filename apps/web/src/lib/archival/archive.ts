@@ -195,6 +195,8 @@ export interface ArchiveNoteInput {
   patient: { name: string; id: string; nhsNumber?: string }
   visitReason: string
   language: string
+  /** Capture mode (scribed | recording_only); absent from consultations archived before it was recorded. */
+  mode?: string
   recordingDurationSeconds?: number
   /**
    * How the recording was captured. Recorded so recordings made with and
@@ -314,6 +316,7 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     patient: { name: input.patient.name, id: input.patient.id, nhsNumber: input.patient.nhsNumber ?? null },
     visitReason: input.visitReason,
     language: input.language,
+    mode: input.mode ?? null,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
     capture: { microphoneProcessing: input.capture?.microphoneProcessing ?? null },
     transcription: input.transcription,

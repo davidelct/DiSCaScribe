@@ -41,6 +41,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "@vercel/analytics": "latest",
     "@vercel/blob": "2.8.0",
+    "postgres": "3.4.7",
     "autoprefixer": "^10.4.20",
     "aws4fetch": "^1.0.20",
     "class-variance-authority": "^0.7.1",

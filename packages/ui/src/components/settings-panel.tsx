@@ -7,6 +7,8 @@ import { Switch } from "@ui/lib/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ui/lib/ui/select"
 import { getAuditRetentionDays, setAuditRetentionDays, purgeAllAuditLogs } from "@storage/audit-log"
 import { loadByokApiKeys, saveByokApiKeys } from "@storage/api-keys-client"
+import { recoverConsultationsFromArchive } from "@storage/shared-store"
+import { mutate as mutateSWR } from "swr"
 import type { EncounterMode, MicrophoneProcessing } from "@storage/types"
 import { AuditLogViewer } from "./audit-log-viewer"
 import { KeytermEditor } from "./keyterm-editor"
@@ -46,6 +48,62 @@ function CardHeading({ title, children }: { title: string; children: React.React
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       <p className="text-sm text-muted-foreground">{children}</p>
     </div>
+  )
+}
+
+/**
+ * Consultations live in the shared store; this card pulls in the ones that
+ * only reached the Box archive (made before the store existed, or on a
+ * laptop that has since been wiped).
+ */
+function SharedConsultationsCard() {
+  const [state, setState] = useState<
+    { phase: "idle" } | { phase: "running" } | { phase: "done"; message: string } | { phase: "error"; message: string }
+  >({ phase: "idle" })
+
+  const handleRecover = async () => {
+    setState({ phase: "running" })
+    const result = await recoverConsultationsFromArchive()
+    if (result.status === "unconfigured") {
+      setState({ phase: "error", message: "No shared store is configured on this server." })
+      return
+    }
+    if (result.status === "error") {
+      setState({ phase: "error", message: `Recovery failed (${result.error}).` })
+      return
+    }
+    const { consultations, recall_sessions: recall, failed } = result.value
+    const parts = [
+      `${consultations.inserted} consultation${consultations.inserted === 1 ? "" : "s"} recovered`,
+      `${recall.inserted} recall session${recall.inserted === 1 ? "" : "s"}`,
+    ]
+    if (failed.length > 0) parts.push(`${failed.length} folder${failed.length === 1 ? "" : "s"} could not be read`)
+    setState({ phase: "done", message: `${parts.join(", ")}.` })
+    await mutateSWR("encounters")
+  }
+
+  return (
+    <section className={CARD}>
+      <CardHeading title="Shared consultations">
+        Consultations are shared by every browser that logs in. Recover brings in any that only reached the Box
+        archive; ones already here are left as they are.
+      </CardHeading>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          variant="outline"
+          onClick={() => void handleRecover()}
+          disabled={state.phase === "running"}
+          className="h-9 rounded-md"
+        >
+          {state.phase === "running" ? "Recovering…" : "Recover from Box"}
+        </Button>
+        {(state.phase === "done" || state.phase === "error") && (
+          <p className={state.phase === "error" ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
+            {state.message}
+          </p>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -122,7 +180,7 @@ export function SettingsPanel({
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">Settings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Microphone, capture mode, vocabulary, keys and audit logs for this device.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Microphone, capture mode, vocabulary, keys and audit logs for this device, and the shared consultations.</p>
         </div>
         <div className="flex items-center gap-3">
           {saveMessage && (
@@ -269,6 +327,8 @@ export function SettingsPanel({
               : "No personal keys set: requests use the server's keys (not available on bring-your-own-key accounts)."}
           </p>
         </section>
+
+        <SharedConsultationsCard />
 
         {/* Audit logs */}
         <section className={CARD}>

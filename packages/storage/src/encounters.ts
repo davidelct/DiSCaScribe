@@ -1,17 +1,73 @@
 import type { Encounter, NoteVersion, NoteVersionSource } from "./types"
 import { loadSecureItem, saveSecureItem } from "./secure-storage"
+import { debugWarn } from "./debug-logger"
+import {
+  deleteSharedEncounter,
+  fetchSharedEncounters,
+  putSharedEncounter,
+  reconcileWithStore,
+} from "./shared-store"
 
+/** The local copy: the whole store without a shared one, a mirror of it otherwise. */
 const STORAGE_KEY = "openscribe_encounters"
 
 export function generateId(): string {
   return crypto.randomUUID()
 }
 
+async function getLocalEncounters(): Promise<Encounter[]> {
+  return (await loadSecureItem<Encounter[]>(STORAGE_KEY)) ?? []
+}
+
+/** Newest copy of each consultation across two lists, newest consultation first. */
+function mergeNewest(primary: Encounter[], secondary: Encounter[]): Encounter[] {
+  const byId = new Map(primary.map((encounter) => [encounter.id, encounter]))
+  for (const encounter of secondary) {
+    const current = byId.get(encounter.id)
+    if (!current || current.updated_at < encounter.updated_at) byId.set(encounter.id, encounter)
+  }
+  return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+/**
+ * Every consultation: from the shared store when the server has one (after
+ * handing it anything only this browser holds), else from the local store.
+ * When the shared store cannot be reached, the local mirror stands in.
+ */
 export async function getEncounters(): Promise<Encounter[]> {
   if (typeof window === "undefined") return []
-  const encounters = await loadSecureItem<Encounter[]>(STORAGE_KEY)
-  if (!encounters) return []
+  const local = await getLocalEncounters()
+  const shared = await fetchSharedEncounters()
+  if (shared.status === "unconfigured") return local
+  if (shared.status === "error") {
+    debugWarn("Shared consultation store unreachable; showing this browser's copy", shared.error)
+    return local
+  }
+
+  const reconciled = await reconcileWithStore(local)
+  if (!reconciled.ok) {
+    // Keep the local copy intact until the hand-over succeeds.
+    return mergeNewest(shared.value.encounters, local)
+  }
+  let encounters = shared.value.encounters
+  if (reconciled.sent) {
+    const again = await fetchSharedEncounters()
+    if (again.status === "ok") encounters = again.value.encounters
+  }
+  await saveEncounters(encounters)
   return encounters
+}
+
+/** Save one consultation: `all` is the full list with it already applied. */
+export async function persistEncounter(all: Encounter[], encounter: Encounter): Promise<void> {
+  await saveEncounters(all)
+  await putSharedEncounter(encounter)
+}
+
+/** Delete one consultation: `all` is the full list without it. */
+export async function removePersistedEncounter(all: Encounter[], id: string): Promise<void> {
+  await saveEncounters(all)
+  await deleteSharedEncounter(id)
 }
 
 export async function saveEncounters(encounters: Encounter[]): Promise<void> {

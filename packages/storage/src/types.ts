@@ -225,6 +225,7 @@ export type AuditEventType =
   | "encounter.deleted"
   | "encounter.archived"
   | "encounter.archive_failed"
+  | "encounter.recovered"
   | "transcription.segment_uploaded"
   | "transcription.completed"
   | "transcription.failed"

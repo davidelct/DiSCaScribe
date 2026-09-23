@@ -10,7 +10,13 @@
  * We persist the compressed MP3 (the same artifact produced for upload, ~a few
  * MB per consult) rather than the raw WAV. Every operation is a graceful no-op
  * when IndexedDB is unavailable (SSR, tests), mirroring saveEncounters().
+ *
+ * Only the browser that recorded a consultation has it here; every other
+ * browser streams it from the archive once (see fetchArchivedAudio) and keeps
+ * that copy.
  */
+
+import { fetchArchivedAudio } from "./shared-store"
 
 const DB_NAME = "discascribe-audio"
 const STORE_NAME = "recordings"
@@ -54,8 +60,19 @@ export async function saveEncounterAudio(encounterId: string, blob: Blob): Promi
   }
 }
 
-/** Load an encounter's recording, or null if none is stored. */
+/**
+ * Load an encounter's recording: this browser's copy, else the archived one
+ * (fetched once, then kept here), or null when neither exists.
+ */
 export async function getEncounterAudio(encounterId: string): Promise<Blob | null> {
+  const local = await getLocalEncounterAudio(encounterId)
+  if (local || !encounterId) return local
+  const archived = await fetchArchivedAudio(encounterId)
+  if (archived) await saveEncounterAudio(encounterId, archived)
+  return archived
+}
+
+async function getLocalEncounterAudio(encounterId: string): Promise<Blob | null> {
   if (!encounterId) return null
   const db = await openDb()
   if (!db) return null

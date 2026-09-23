@@ -39,4 +39,12 @@ export class BoxStorageClient implements StorageClient {
   ): Promise<StorageFileRef> {
     return this.client.uploadFile(containerId, name, data, contentType, existingId)
   }
+
+  listContainers(): Promise<StorageFileRef[]> {
+    return this.client.listSubfolders(this.parentFolderId)
+  }
+
+  downloadFile(fileId: string, range?: string): Promise<Response> {
+    return this.client.downloadFile(fileId, range)
+  }
 }

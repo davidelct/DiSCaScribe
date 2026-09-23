@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The consultations tab: every consultation on this device in one table,
+ * The consultations tab: every consultation in one table,
  * newest first, tied to a patient or not. The patient register answers "what
  * has happened to this patient?"; this answers "what have I recorded?", and
  * it is where a consultation starts when there is no patient to start it from.
@@ -69,7 +69,7 @@ function ConsultationsContent() {
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">Consultations</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Every consultation recorded on this device.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Every consultation, from every device.</p>
           </div>
           <div className="flex items-center gap-3">
             <span className="flex h-9 items-center gap-2 rounded-md border border-border bg-card px-3 text-xs text-muted-foreground">

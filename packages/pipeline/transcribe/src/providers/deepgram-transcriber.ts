@@ -389,6 +389,16 @@ function extractTranscript(result: DeepgramResponse, diarize: boolean): Transcri
   return { text, spans }
 }
 
+/**
+ * Rebuild the transcript and its confidence spans from a stored Deepgram
+ * response (raw_transcript.json in the archive). Recovery uses this to restore
+ * the per-word confidence marks, which only the browser kept.
+ */
+export function transcriptFromDeepgramResponse(raw: unknown): { text: string; words: TranscriptWordSpan[] } {
+  const { text, spans } = extractTranscript((raw ?? {}) as DeepgramResponse, true)
+  return { text, words: spans }
+}
+
 /** The raw, parsed Deepgram response plus whether diarization was requested. */
 export interface DeepgramDetailedResult {
   /** Transcript text (diarized with `Speaker N:` labels when diarize is on). */

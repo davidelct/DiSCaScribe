@@ -25,7 +25,7 @@ import {
   toPipelineError,
   type PipelineError,
 } from "@pipeline-errors"
-import type { Encounter, MicrophoneProcessing, TranscriptWordSpan } from "@storage/types"
+import type { Encounter, EncounterMode, MicrophoneProcessing, TranscriptWordSpan } from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
@@ -89,6 +89,7 @@ interface ArchivePayload {
     recording_duration?: number
     /** How the microphone was captured, when the audio was recorded in the app. */
     microphone_processing?: MicrophoneProcessing
+    mode: EncounterMode
   }
   /** Omitted for consultations that have no note yet. */
   note?: string
@@ -189,7 +190,7 @@ function ReadyPanel({
 }
 
 function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) {
-  const { encounters, updateEncounter, refresh } = useEncounters()
+  const { encounters, loaded: encountersLoaded, updateEncounter, refresh } = useEncounters()
   const encounter = encounters.find((e: Encounter) => e.id === encounterId)
 
   const httpsWarning = useHttpsWarning()
@@ -221,13 +222,6 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   // the settings dialog (top bar) surfaces its own readiness state instead.
   const [, setLastFailureCode] = useState("")
 
-  // Encounters hydrate asynchronously from encrypted storage; give them a
-  // beat before declaring the consultation missing.
-  const [hydrationGraceOver, setHydrationGraceOver] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setHydrationGraceOver(true), 1500)
-    return () => clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     const prefs = getPreferences()
@@ -460,6 +454,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
               created_at: enc.created_at,
               recording_duration: enc.recording_duration,
               microphone_processing: enc.microphone_processing,
+              mode: enc.mode ?? "scribed",
             },
             note,
             note_version: note !== undefined ? (noteVersion ?? 0) : undefined,
@@ -1147,10 +1142,10 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
       <div className="flex min-h-screen flex-col bg-background">
         <TopBar />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-          {hydrationGraceOver ? (
+          {encountersLoaded ? (
             <>
               <FileQuestion className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">This consultation does not exist on this device.</p>
+              <p className="text-sm text-muted-foreground">This consultation does not exist.</p>
               <Link href="/consultations" className="text-sm font-medium text-primary hover:underline">
                 Back to consultations
               </Link>

@@ -4,24 +4,28 @@ import useSWR from "swr"
 import type { Encounter } from "@storage/types"
 import {
   getEncounters,
-  saveEncounters,
+  persistEncounter,
+  removePersistedEncounter,
   createEncounter,
   updateEncounter,
   deleteEncounter,
 } from "@storage/encounters"
 import { writeAuditEntry } from "@storage/audit-log"
 
+/** Stable stand-in while the list loads, so effects keyed on it do not re-run. */
+const NO_ENCOUNTERS: Encounter[] = []
+
 export function useEncounters() {
-  const { data: encounters = [], mutate } = useSWR<Encounter[]>("encounters", () => getEncounters(), {
-    fallbackData: [],
+  const { data, mutate } = useSWR<Encounter[]>("encounters", () => getEncounters(), {
     revalidateOnFocus: false,
   })
+  const encounters = data ?? NO_ENCOUNTERS
 
   const addEncounter = async (data: Partial<Encounter>) => {
     try {
       const newEncounter = createEncounter(data)
       const updated = [newEncounter, ...encounters]
-      await saveEncounters(updated)
+      await persistEncounter(updated, newEncounter)
       await mutate(updated, false)
 
       // Audit log: encounter created
@@ -50,7 +54,8 @@ export function useEncounters() {
   const update = async (id: string, updates: Partial<Encounter>) => {
     try {
       const updated = updateEncounter(encounters, id, updates)
-      await saveEncounters(updated)
+      const changed = updated.find((encounter) => encounter.id === id)
+      if (changed) await persistEncounter(updated, changed)
       await mutate(updated, false)
 
       // Audit log: encounter updated
@@ -78,7 +83,7 @@ export function useEncounters() {
   const remove = async (id: string) => {
     try {
       const updated = deleteEncounter(encounters, id)
-      await saveEncounters(updated)
+      await removePersistedEncounter(updated, id)
       await mutate(updated, false)
 
       // Audit log: encounter deleted
@@ -101,6 +106,8 @@ export function useEncounters() {
 
   return {
     encounters,
+    /** False until the list has loaded; a missing consultation means nothing before that. */
+    loaded: data !== undefined,
     addEncounter,
     updateEncounter: update,
     deleteEncounter: remove,

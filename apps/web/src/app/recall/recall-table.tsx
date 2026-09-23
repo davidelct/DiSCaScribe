@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The stimulated recall tab: every consultation on this device, with where
+ * The stimulated recall tab: every consultation, with where
  * its recall interview stands and a way in. The interview goes back over
  * the transcript, so a consultation without a transcript is listed but
  * cannot be started.

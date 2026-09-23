@@ -22,6 +22,8 @@ interface EncounterPayload {
   recording_duration?: number
   /** "browser" or "raw"; how the microphone was captured. Absent for uploads. */
   microphone_processing?: string
+  /** "scribed" or "recording_only"; recorded so the archive alone can rebuild the consultation. */
+  mode?: string
 }
 
 function jsonError(status: number, code: string, message: string) {
@@ -113,6 +115,7 @@ export async function POST(req: NextRequest) {
       },
       visitReason: encounter.visit_reason || "",
       language: encounter.language || "en",
+      mode: encounter.mode === "recording_only" || encounter.mode === "scribed" ? encounter.mode : undefined,
       recordingDurationSeconds: encounter.recording_duration,
       capture: {
         microphoneProcessing:

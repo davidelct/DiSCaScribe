@@ -1,6 +1,12 @@
 import { parseDiarizedTranscript, type RecallExchangeRange, type TranscriptTurn } from "@pipeline-errors"
 import { loadSecureItem, saveSecureItem } from "@storage/secure-storage"
 import { getEncounterAudio } from "@storage/audio-store"
+import {
+  fetchSharedRecallSession,
+  putSharedRecallSession,
+  recallSessionUnsynced,
+  RECALL_STORAGE_PREFIX,
+} from "@storage/shared-store"
 
 /**
  * Stimulated recall (WT3.1) session data.
@@ -12,7 +18,8 @@ import { getEncounterAudio } from "@storage/audio-store"
  * supported it (−10..+10). The table carries forward: a hypothesis reported
  * at one stop is on every later table, and a likelihood not re-rated at a
  * stop is the one from the stop before. Sessions are persisted per encounter
- * in the encrypted store.
+ * in the shared store when the server has one (so the recall can be reviewed
+ * from any laptop), with the encrypted local store as a mirror.
  */
 
 export interface RecallHypothesis {
@@ -94,7 +101,7 @@ export function emptyRecallSession(): RecallSession {
 }
 
 function storageKey(encounterId: string): string {
-  return `openscribe_recall_${encounterId}`
+  return `${RECALL_STORAGE_PREFIX}${encounterId}`
 }
 
 /** Audio-store key for the recall-interview recording of an encounter. */
@@ -108,11 +115,29 @@ export function recallAudioKey(encounterId: string): string {
  * before the per-stop tables (per-utterance cue ratings on a −3..+3 scale)
  * are not carried over: the measure changed, so they start afresh.
  */
-export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
+type StoredRecallSession = Omit<Partial<RecallSession>, "version"> & { version?: number }
+
+/**
+ * The session to show: the shared store's copy, unless this browser holds
+ * one the store has not taken yet (or has none at all), which is then handed
+ * over. Without a reachable store, the local copy.
+ */
+async function loadStoredSession(encounterId: string): Promise<StoredRecallSession | null> {
   // The stored version is any past one, so it is read wider than RecallSession's.
-  const saved = await loadSecureItem<Omit<Partial<RecallSession>, "version"> & { version?: number }>(
-    storageKey(encounterId),
-  )
+  const local = await loadSecureItem<StoredRecallSession>(storageKey(encounterId))
+  const shared = await fetchSharedRecallSession(encounterId)
+  if (shared.status !== "ok") return local
+  const remote = shared.value.session as StoredRecallSession | null
+  if (local && (!remote || recallSessionUnsynced(encounterId))) {
+    void putSharedRecallSession(encounterId, local)
+    return local
+  }
+  if (remote) void saveSecureItem(storageKey(encounterId), remote)
+  return remote
+}
+
+export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
+  const saved = await loadStoredSession(encounterId)
   if (!saved || (saved.version !== 2 && saved.version !== 3)) return emptyRecallSession()
   return {
     version: 3,
@@ -166,8 +191,9 @@ function migrateEntry(raw: RecallEntry & { why?: string; thinking?: string }): R
   return { ...entry, notes, ratings }
 }
 
-export function saveRecallSession(encounterId: string, session: RecallSession): Promise<void> {
-  return saveSecureItem<RecallSession>(storageKey(encounterId), session)
+export async function saveRecallSession(encounterId: string, session: RecallSession): Promise<void> {
+  await saveSecureItem<RecallSession>(storageKey(encounterId), session)
+  await putSharedRecallSession(encounterId, session)
 }
 
 /** Entries in transcript order: numbering follows the consultation, not the order the stops were made in. */

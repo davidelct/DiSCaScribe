@@ -37,6 +37,7 @@ export {
 export {
   transcribeWavBuffer as transcribeWithDeepgram,
   transcribeWavBufferDetailed as transcribeWithDeepgramDetailed,
+  transcriptFromDeepgramResponse,
   type DeepgramDetailedResult,
 } from "./providers/deepgram-transcriber"
 export {

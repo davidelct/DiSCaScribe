@@ -9,7 +9,7 @@
  * that detects exchanges for a consultation that has none yet.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback } from "react"
 import Link from "next/link"
 import { format } from "date-fns"
 import { ArrowLeft, FileQuestion, Loader2 } from "lucide-react"
@@ -22,17 +22,10 @@ import { detectRecallExchanges } from "@/app/actions"
 import { TopBar } from "../../top-bar"
 
 function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
-  const { encounters, updateEncounter } = useEncounters()
+  const { encounters, loaded: encountersLoaded, updateEncounter } = useEncounters()
   const httpsWarning = useHttpsWarning()
   const encounter = encounters.find((e: Encounter) => e.id === encounterId)
 
-  // Encounters hydrate asynchronously from encrypted storage; give them a
-  // beat before declaring the consultation missing.
-  const [hydrationGraceOver, setHydrationGraceOver] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setHydrationGraceOver(true), 1500)
-    return () => clearTimeout(timer)
-  }, [])
 
   // Detection normally runs beside note generation; older consultations, and
   // any where it failed, get it here on first open.
@@ -50,10 +43,10 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
       <div className="flex min-h-screen flex-col bg-background">
         <TopBar />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-          {hydrationGraceOver ? (
+          {encountersLoaded ? (
             <>
               <FileQuestion className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">This consultation does not exist on this device.</p>
+              <p className="text-sm text-muted-foreground">This consultation does not exist.</p>
               <Link href="/recall" className="text-sm font-medium text-primary hover:underline">
                 Back to stimulated recall
               </Link>
