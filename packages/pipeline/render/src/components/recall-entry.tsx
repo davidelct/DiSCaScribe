@@ -9,17 +9,18 @@ import {
   SUPPORT_RANGE,
   type FinalDiagnosisRow,
   type RecallEntry,
-  type RecallHypothesis,
+  type RecallRow,
 } from "./recall-session"
 
 /**
  * One stop of the recall interview as a card: the turns it is about, the
  * template's table as a summary of the rows so far, and a form below it
- * that adds a row. Clicking a row loads it into the form to change it.
+ * that adds a row (clicking a row loads it into the form to change it).
  *
- * A row is what the study asks of the clinician at a question: the
- * diagnostic hypothesis, the reason for asking, how likely the hypothesis
- * seemed (0–10), and how much the answer supported it (−10..+10).
+ * A row is what the template asks at a question: why it was asked and
+ * whether hypotheses were in mind, what the answer told the clinician, how
+ * likely the hypothesis seemed (0–10), how much the answer supported it
+ * (−10..+10), and notes. A vague takeaway is a row with text and no numbers.
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
@@ -31,6 +32,9 @@ const NUMBER_BOX =
   BOX + " h-8 w-16 px-1 text-center font-mono font-semibold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
 const TH = "pb-1.5 pr-3 text-left align-bottom text-xs font-medium text-muted-foreground"
 const TD = "py-1.5 pr-3 align-top text-[13px] leading-[18px] text-foreground"
+
+export const WHY_QUESTION = "Why did you ask this question / these questions? Did you have specific hypotheses in mind?"
+export const TOLD_QUESTION = "What did the answer(s) tell you? Did it/they suggest specific hypotheses?"
 
 function formatSupport(value: number): string {
   return value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : "0"
@@ -62,54 +66,40 @@ export interface EntryExcerptLine {
   text: string
 }
 
-/** One row of the table: a hypothesis at this entry, with what the previous table carried. */
-export interface EntryRow {
-  hypothesis: RecallHypothesis
-  reason: string
-  /** As reported at this entry, or null when carried. */
-  likelihood: number | null
-  /** What the previous table had; what a null likelihood means. */
-  carried: number | null
-  support: number | null
-}
-
-/** What the form submits. */
+/** What the form submits: the template's fields. */
 export interface EntryRowInput {
-  name: string
-  reason: string
+  why: string
+  told: string
   likelihood: number | null
   support: number | null
+  notes: string
 }
 
 interface RecallEntryCardProps {
   number: number
   entry: RecallEntry
   excerpt: EntryExcerptLine[]
-  rows: EntryRow[]
   /** The entry whose turns are ticked in the transcript. */
   open: boolean
   onOpen: () => void
-  onChange: (patch: Partial<Pick<RecallEntry, "notes">>) => void
   onAddRow: (row: EntryRowInput) => void
-  onSaveRow: (hypothesisId: string, row: EntryRowInput) => void
-  onRemoveHypothesis: (hypothesisId: string) => void
+  onSaveRow: (rowId: string, row: EntryRowInput) => void
+  onRemoveRow: (rowId: string) => void
   onRemove: () => void
   cardRef: (element: HTMLElement | null) => void
 }
 
-const EMPTY_FORM = { name: "", reason: "", likelihood: "", support: "" }
+const EMPTY_FORM = { why: "", told: "", likelihood: "", support: "", notes: "" }
 
 export function RecallEntryCard({
   number,
   entry,
   excerpt,
-  rows,
   open,
   onOpen,
-  onChange,
   onAddRow,
   onSaveRow,
-  onRemoveHypothesis,
+  onRemoveRow,
   onRemove,
   cardRef,
 }: RecallEntryCardProps) {
@@ -122,13 +112,14 @@ export function RecallEntryCard({
     if (!open) setConfirmingRemove(false)
   }, [open])
 
-  const editRow = (row: EntryRow) => {
-    setEditingId(row.hypothesis.id)
+  const editRow = (row: RecallRow) => {
+    setEditingId(row.id)
     setForm({
-      name: row.hypothesis.name,
-      reason: row.reason,
-      likelihood: row.likelihood !== null ? String(row.likelihood) : row.carried !== null ? String(row.carried) : "",
+      why: row.why,
+      told: row.told,
+      likelihood: row.likelihood !== null ? String(row.likelihood) : "",
       support: row.support !== null ? String(row.support) : "",
+      notes: row.notes,
     })
   }
 
@@ -137,15 +128,17 @@ export function RecallEntryCard({
     setForm(EMPTY_FORM)
   }
 
+  const canSubmit = Boolean(form.why.trim() || form.told.trim() || form.notes.trim())
+
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    const name = form.name.trim()
-    if (!name) return
+    if (!canSubmit) return
     const row: EntryRowInput = {
-      name,
-      reason: form.reason.trim(),
+      why: form.why.trim(),
+      told: form.told.trim(),
       likelihood: parseScale(form.likelihood, LIKELIHOOD_RANGE.min, LIKELIHOOD_RANGE.max),
       support: parseScale(form.support, SUPPORT_RANGE.min, SUPPORT_RANGE.max),
+      notes: form.notes.trim(),
     }
     if (editingId) onSaveRow(editingId, row)
     else onAddRow(row)
@@ -206,60 +199,54 @@ export function RecallEntryCard({
         <table className="w-full table-fixed border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className={cn(TH, "w-[32%]")}>Hypothesis</th>
-              <th className={TH}>Reason for asking</th>
-              <th className={cn(TH, "w-[76px] text-center")}>Likelihood</th>
-              <th className={cn(TH, "w-[64px] pr-0 text-center")}>Support</th>
+              <th className={TH}>{WHY_QUESTION}</th>
+              <th className={TH}>{TOLD_QUESTION}</th>
+              <th className={cn(TH, "w-[82px] text-center")}>Likelihood (0–10)</th>
+              <th className={cn(TH, "w-[96px] text-center")}>Information support (−10 to +10)</th>
+              <th className={cn(TH, "pr-0")}>Notes</th>
               {open && <th className="w-6" />}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {entry.rows.length === 0 && (
               <tr>
-                <td colSpan={open ? 5 : 4} className="py-2 text-xs text-muted-foreground">
+                <td colSpan={open ? 6 : 5} className="py-2 text-xs text-muted-foreground">
                   No rows yet.
                 </td>
               </tr>
             )}
-            {rows.map((row) => (
+            {entry.rows.map((row) => (
               <tr
-                key={row.hypothesis.id}
+                key={row.id}
                 onClick={open ? () => editRow(row) : undefined}
                 title={open ? "Click to change this row" : undefined}
                 className={cn(
                   "border-b border-border/60 last:border-b-0",
                   open && "cursor-pointer hover:bg-accent/60",
-                  editingId === row.hypothesis.id && "bg-brand-soft/50",
+                  editingId === row.id && "bg-brand-soft/50",
                 )}
               >
-                <td className={cn(TD, "text-sm")}>{row.hypothesis.name}</td>
-                <td className={TD}>{row.reason}</td>
-                <td className={cn(TD, "text-center font-mono font-semibold")}>
-                  {row.likelihood !== null ? (
-                    row.likelihood
-                  ) : row.carried !== null ? (
-                    <span className="text-muted-foreground" title="Carried over from the previous table">
-                      {row.carried}
-                    </span>
-                  ) : null}
-                </td>
-                <td className={cn(TD, "pr-0 text-center font-mono font-semibold", row.support !== null && supportClass(row.support))}>
+                <td className={cn(TD, "whitespace-pre-wrap")}>{row.why}</td>
+                <td className={cn(TD, "whitespace-pre-wrap")}>{row.told}</td>
+                <td className={cn(TD, "text-center font-mono font-semibold")}>{row.likelihood ?? null}</td>
+                <td className={cn(TD, "text-center font-mono font-semibold", row.support !== null && supportClass(row.support))}>
                   {row.support !== null ? formatSupport(row.support) : null}
                 </td>
+                <td className={cn(TD, "whitespace-pre-wrap pr-0")}>{row.notes}</td>
                 {open && (
                   <td className="py-1 pl-1 text-right align-top">
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation()
-                        if (editingId === row.hypothesis.id) resetForm()
-                        onRemoveHypothesis(row.hypothesis.id)
+                        if (editingId === row.id) resetForm()
+                        onRemoveRow(row.id)
                       }}
-                      title={`Remove ${row.hypothesis.name} from every table`}
+                      title="Remove this row"
                       className="rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     >
                       <X className="h-3 w-3" />
-                      <span className="sr-only">Remove {row.hypothesis.name}</span>
+                      <span className="sr-only">Remove row</span>
                     </button>
                   </td>
                 )}
@@ -271,11 +258,14 @@ export function RecallEntryCard({
         {/* The form: how a row is added, or changed once clicked. */}
         {open && (
           <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-lg border border-border bg-background p-3">
-            <Field label="Diagnostic hypothesis">
-              <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={BOX} />
+            <Field label={WHY_QUESTION}>
+              <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
             </Field>
-            <Field label="Reason for asking">
-              <textarea rows={2} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} className={cn(BOX, "resize-none")} />
+            <Field label={TOLD_QUESTION}>
+              <textarea rows={2} value={form.told} onChange={(event) => setForm({ ...form, told: event.target.value })} className={cn(BOX, "resize-none")} />
+            </Field>
+            <Field label="Notes">
+              <textarea rows={2} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className={cn(BOX, "resize-none")} />
             </Field>
             <div className="flex flex-wrap items-end gap-2.5">
               <Field label="Likelihood 0–10">
@@ -303,7 +293,7 @@ export function RecallEntryCard({
                 />
               </Field>
               <div className="flex items-center gap-2">
-                <Button type="submit" size="sm" disabled={!form.name.trim()} className="h-8 rounded-md px-3">
+                <Button type="submit" size="sm" disabled={!canSubmit} className="h-8 rounded-md px-3">
                   {editingId ? "Save row" : "Add row"}
                 </Button>
                 {editingId && (
@@ -314,16 +304,6 @@ export function RecallEntryCard({
               </div>
             </div>
           </form>
-        )}
-
-        {(open || entry.notes) && (
-          <Field label="Notes">
-            {open ? (
-              <textarea rows={2} value={entry.notes} onChange={(event) => onChange({ notes: event.target.value })} className={cn(BOX, "resize-none")} />
-            ) : (
-              <p className="text-[13px] leading-[18px] text-foreground">{entry.notes}</p>
-            )}
-          </Field>
         )}
       </div>
     </article>

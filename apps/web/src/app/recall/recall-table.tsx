@@ -48,7 +48,7 @@ function recallStage(summary: RecallSessionSummary | undefined, hasTranscript: b
   if (summary.recorded) {
     return { label: "Recorded", className: "border-primary/25 bg-brand-soft/50 text-primary", action: "Open" }
   }
-  if (summary.hypotheses > 0 || summary.entries > 0) {
+  if (summary.entries > 0) {
     return {
       label: `In progress · ${summary.entries} ${summary.entries === 1 ? "entry" : "entries"}`,
       className: "border-warning/40 bg-warning/10 text-warning-foreground",

@@ -10,13 +10,10 @@ import { guessClinicianSpeaker, heuristicRecallExchanges } from "@pipeline-error
 import { Check, Download, Loader2, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
 import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
-import { FinalDiagnosisCard, RecallEntryCard, type EntryRow, type EntryRowInput } from "./recall-entry"
+import { FinalDiagnosisCard, RecallEntryCard, type EntryRowInput } from "./recall-entry"
 import {
-  EMPTY_RATING,
   buildRecallPayload,
-  carriedLikelihood,
   emptyRecallSession,
-  hypothesesAt,
   loadRecallSession,
   orderedEntries,
   recallAudioKey,
@@ -33,10 +30,11 @@ import {
  * consultation view, every turn clickable and the question–answer exchanges
  * bracketed (detected by a small model beside note generation, or by a
  * question-mark heuristic until then). Right, the template's table once per
- * stop in transcript order: a row per diagnostic hypothesis with the reason
- * for asking, the hypothesis's likelihood and how much the answer supported
- * it. A new table starts from the previous one. The recall interview can be
- * recorded alongside, with every turn click timed against the recording.
+ * stop in transcript order: a row per thought, each answering why the
+ * question was asked and what the answer told the clinician, with the
+ * hypothesis's likelihood and how much the answer supported it, plus notes.
+ * The recall interview can be recorded alongside, with every turn click
+ * timed against the recording.
  */
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
@@ -49,8 +47,8 @@ const CARD = "rounded-2xl border border-border bg-card shadow-soft"
 const PROMPT =
   "Go back over the consultation as it happened and report only the thoughts you remember having at the time: " +
   "tentative diagnoses, why you asked a question, what you made of the answer. Leave out what you know now and " +
-  "anything you are unsure of. For each hypothesis, rate how likely it seemed then and how much the answer " +
-  "supported it. You need not be exhaustive."
+  "anything you are unsure of. For each row, rate how likely the hypothesis seemed then and how much the " +
+  "answer supported it. You need not be exhaustive."
 
 function formatDuration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds))
@@ -253,28 +251,15 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   const ordered = useMemo(() => orderedEntries(session), [session])
   const entryViews = useMemo(
     () =>
-      ordered.map((entry, position) => {
-        const rows: EntryRow[] = hypothesesAt(session, ordered, position).map((hypothesis) => {
-          const rating = entry.ratings[hypothesis.id] ?? EMPTY_RATING
-          return {
-            hypothesis,
-            reason: rating.reason,
-            likelihood: rating.likelihood,
-            carried: carriedLikelihood(ordered, position, hypothesis.id),
-            support: rating.support,
-          }
-        })
-        return {
-          entry,
-          number: position + 1,
-          rows,
-          excerpt: entry.turns.map((index) => ({
-            label: speakerLabel(turns[index]?.speaker ?? 0),
-            text: turns[index]?.text ?? "",
-          })),
-        }
-      }),
-    [ordered, session, speakerLabel, turns],
+      ordered.map((entry, position) => ({
+        entry,
+        number: position + 1,
+        excerpt: entry.turns.map((index) => ({
+          label: speakerLabel(turns[index]?.speaker ?? 0),
+          text: turns[index]?.text ?? "",
+        })),
+      })),
+    [ordered, speakerLabel, turns],
   )
   const entryByTurn = useMemo(() => {
     const map = new Map<number, RecallEntry>()
@@ -367,8 +352,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     const entry: RecallEntry = {
       id: crypto.randomUUID(),
       turns: [...selected].sort((a, b) => a - b),
-      notes: "",
-      ratings: {},
+      rows: [],
       createdAt: new Date().toISOString(),
     }
     update((current) => ({ ...current, entries: [...current.entries, entry] }))
@@ -377,16 +361,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   }
 
   const removeEntry = (id: string) => {
-    update((current) => {
-      const entries = current.entries.filter((entry) => entry.id !== id)
-      // A hypothesis first reported here moves to the earliest remaining
-      // table, or goes with the entry when none is left.
-      const earliest = orderedEntries({ ...current, entries })[0]
-      const hypotheses = current.hypotheses.flatMap((hypothesis) =>
-        hypothesis.entryId !== id ? [hypothesis] : earliest ? [{ ...hypothesis, entryId: earliest.id }] : [],
-      )
-      return { ...current, entries, hypotheses }
-    })
+    update((current) => ({ ...current, entries: current.entries.filter((entry) => entry.id !== id) }))
     setActiveId((current) => (current === id ? null : current))
   }
 
@@ -396,55 +371,22 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       entries: current.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
     }))
 
-  // A row from the form: a new hypothesis, first reported at this entry,
-  // with its ratings here.
+  // Rows belong to their stop: the template's four fields, as entered.
   const addRow = (entryId: string, row: EntryRowInput) =>
-    update((current) => {
-      const id = crypto.randomUUID()
-      return {
-        ...current,
-        hypotheses: [...current.hypotheses, { id, name: row.name, entryId }],
-        entries: current.entries.map((entry) =>
-          entry.id === entryId
-            ? { ...entry, ratings: { ...entry.ratings, [id]: { reason: row.reason, likelihood: row.likelihood, support: row.support } } }
-            : entry,
-        ),
-      }
-    })
+    patchRows(entryId, (rows) => [...rows, { id: crypto.randomUUID(), ...row }])
 
-  // A row changed through the form: the name applies to every table, the
-  // rest to this entry only.
-  const saveRow = (entryId: string, hypothesisId: string, row: EntryRowInput) =>
+  const saveRow = (entryId: string, rowId: string, row: EntryRowInput) =>
+    patchRows(entryId, (rows) => rows.map((existing) => (existing.id === rowId ? { ...existing, ...row } : existing)))
+
+  const removeRow = (entryId: string, rowId: string) =>
+    patchRows(entryId, (rows) => rows.filter((existing) => existing.id !== rowId))
+
+  function patchRows(entryId: string, change: (rows: RecallEntry["rows"]) => RecallEntry["rows"]) {
     update((current) => ({
       ...current,
-      hypotheses: current.hypotheses.map((hypothesis) =>
-        hypothesis.id === hypothesisId ? { ...hypothesis, name: row.name } : hypothesis,
-      ),
-      entries: current.entries.map((entry) =>
-        entry.id === entryId
-          ? {
-              ...entry,
-              ratings: {
-                ...entry.ratings,
-                [hypothesisId]: { reason: row.reason, likelihood: row.likelihood, support: row.support },
-              },
-            }
-          : entry,
-      ),
+      entries: current.entries.map((entry) => (entry.id === entryId ? { ...entry, rows: change(entry.rows) } : entry)),
     }))
-
-  // Removing a hypothesis takes it off every table, ratings included.
-  const removeHypothesis = (hypothesisId: string) =>
-    update((current) => ({
-      ...current,
-      hypotheses: current.hypotheses.filter((hypothesis) => hypothesis.id !== hypothesisId),
-      entries: current.entries.map((entry) => {
-        if (!(hypothesisId in entry.ratings)) return entry
-        const ratings = { ...entry.ratings }
-        delete ratings[hypothesisId]
-        return { ...entry, ratings }
-      }),
-    }))
+  }
 
   // ── Recording, archival, export ───────────────────────────────────────────
   const sessionPayload = useCallback(
@@ -471,7 +413,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       // While recording, the stop archives the session with the recording.
       if (recordingRef.current || !archiveConfiguredRef.current) return
       const current = sessionRef.current
-      if (current.entries.length === 0 && current.hypotheses.length === 0 && current.finalDiagnosis.length === 0) return
+      if (current.entries.length === 0 && current.finalDiagnosis.length === 0) return
       const formData = new FormData()
       formData.append("encounter_id", encounter.id)
       formData.append("created_at", encounter.created_at)
@@ -606,7 +548,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     )
   }
 
-  const nothingToExport = session.entries.length === 0 && session.hypotheses.length === 0
+  const nothingToExport = session.entries.length === 0
 
   return (
     <div className="flex flex-col gap-4 lg:min-h-0 lg:flex-1">
@@ -797,13 +739,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 number={view.number}
                 entry={view.entry}
                 excerpt={view.excerpt}
-                rows={view.rows}
                 open={view.entry.id === activeId}
                 onOpen={() => activateEntry(view.entry.id, true)}
-                onChange={(patch) => patchEntry(view.entry.id, patch)}
                 onAddRow={(row) => addRow(view.entry.id, row)}
-                onSaveRow={(hypothesisId, row) => saveRow(view.entry.id, hypothesisId, row)}
-                onRemoveHypothesis={removeHypothesis}
+                onSaveRow={(rowId, row) => saveRow(view.entry.id, rowId, row)}
+                onRemoveRow={(rowId) => removeRow(view.entry.id, rowId)}
                 onRemove={() => removeEntry(view.entry.id)}
                 cardRef={(element) => {
                   if (element) entryRefs.current.set(view.entry.id, element)

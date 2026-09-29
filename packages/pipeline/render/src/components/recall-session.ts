@@ -18,42 +18,37 @@ import {
  * Stimulated recall (WT3.1) session data.
  *
  * The clinician goes back over the transcript with an interviewer and stops
- * at turns of their choosing. Each stop is an entry holding the template's
- * table: one row per diagnostic hypothesis with the reason the question was
- * asked, the hypothesis's likelihood (0–10) and how much the answer
- * supported it (−10..+10). The table carries forward: a hypothesis reported
- * at one stop is on every later table, and a likelihood not re-rated at a
- * stop is the one from the stop before. Sessions are persisted per encounter
- * in the shared store when the server has one (so the recall can be reviewed
- * from any laptop), with the encrypted local store as a mirror.
+ * at turns of their choosing. Each stop is an entry holding the study's
+ * template: a table with one row per thought, where a row answers "why did
+ * you ask this question / these questions? did you have specific hypotheses
+ * in mind?", "what did the answer(s) tell you? did it/they suggest specific
+ * hypotheses?", gives a likelihood (0–10) and an information support
+ * (−10..+10), and takes notes. A vague takeaway is a row with the text and
+ * no numbers; the numbers come once a hypothesis has formed, which may be a
+ * later row at a later stop. Sessions are persisted per encounter in the
+ * shared store when the server has one (so the recall can be reviewed from
+ * any laptop), with the encrypted local store as a mirror.
  */
 
-export interface RecallHypothesis {
+/** One row of a stop's table. */
+export interface RecallRow {
   id: string
-  name: string
-  /** The entry at which it was first reported; it is on that table and every later one. */
-  entryId: string
-}
-
-/** One row of the table at one entry. */
-export interface RecallRating {
-  /** Reason for asking the question, free text: what the clinician was after. */
-  reason: string
-  /** 0–10 as reported at this entry; null means carried over from the previous table. */
+  /** "Why did you ask this question / these questions? Did you have specific hypotheses in mind?" */
+  why: string
+  /** "What did the answer(s) tell you? Did it/they suggest specific hypotheses?" */
+  told: string
+  /** 0–10; null until a hypothesis has formed enough to rate. */
   likelihood: number | null
-  /** −10..+10; null when not rated at this entry. */
+  /** −10..+10; null until rated. */
   support: number | null
+  notes: string
 }
-
-export const EMPTY_RATING: RecallRating = { reason: "", likelihood: null, support: null }
 
 export interface RecallEntry {
   id: string
   /** Transcript turns the entry is about, ascending. */
   turns: number[]
-  notes: string
-  /** By hypothesis id. */
-  ratings: Record<string, RecallRating>
+  rows: RecallRow[]
   createdAt: string
 }
 
@@ -89,8 +84,7 @@ export interface RecallTimeline {
 }
 
 export interface RecallSession {
-  version: 3
-  hypotheses: RecallHypothesis[]
+  version: 4
   entries: RecallEntry[]
   finalDiagnosis: FinalDiagnosisRow[]
   /** Timing of the recall recording (replaced on re-record). */
@@ -103,7 +97,7 @@ export const LIKELIHOOD_RANGE = { min: 0, max: 10 } as const
 export const SUPPORT_RANGE = { min: -10, max: 10 } as const
 
 export function emptyRecallSession(): RecallSession {
-  return { version: 3, hypotheses: [], entries: [], finalDiagnosis: [] }
+  return { version: 4, entries: [], finalDiagnosis: [] }
 }
 
 function storageKey(encounterId: string): string {
@@ -116,12 +110,12 @@ export function recallAudioKey(encounterId: string): string {
 }
 
 /**
- * The saved session, or an empty one. Version 2 sessions are migrated in
- * place (see migrateEntry) and overwritten on first save. Sessions from
+ * The saved session, or an empty one. Version 2 and 3 sessions are migrated
+ * in place (see migrateEntry) and overwritten on first save. Sessions from
  * before the per-stop tables (per-utterance cue ratings on a −3..+3 scale)
  * are not carried over: the measure changed, so they start afresh.
  */
-type StoredRecallSession = Omit<Partial<RecallSession>, "version"> & { version?: number }
+type StoredRecallSession = Partial<LegacySession> & { version?: number }
 
 /**
  * The session to show: the shared store's copy, unless this browser holds
@@ -150,16 +144,16 @@ async function loadStoredSession(encounterId: string): Promise<StoredRecallSessi
 /** A stored session in the app's form; one restored from the archive in its exported form is converted. */
 function readable(stored: unknown): StoredRecallSession | null {
   if (!stored) return null
-  return recallSessionFromArchive(stored) ?? (stored as StoredRecallSession)
+  return (recallSessionFromArchive(stored) as StoredRecallSession | null) ?? (stored as StoredRecallSession)
 }
 
 export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
   const saved = await loadStoredSession(encounterId)
-  if (!saved || (saved.version !== 2 && saved.version !== 3)) return emptyRecallSession()
+  if (!saved || (saved.version !== 2 && saved.version !== 3 && saved.version !== 4)) return emptyRecallSession()
+  const hypotheses = saved.hypotheses ?? []
   return {
-    version: 3,
-    hypotheses: saved.hypotheses ?? [],
-    entries: (saved.entries ?? []).map(migrateEntry),
+    version: 4,
+    entries: (saved.entries ?? []).map((entry) => migrateEntry(entry, hypotheses)),
     finalDiagnosis: saved.finalDiagnosis ?? [],
     timeline: saved.timeline,
     recallArchivedAt: saved.recallArchivedAt,
@@ -175,37 +169,68 @@ function joinText(...parts: (string | undefined)[]): string {
 }
 
 /**
- * Rows from earlier cuts of this view. The first kept a single "why" and
- * "thinking" per stop, before the template put them per row; rows then kept
- * "why did you ask that?" beside "what were you thinking?" until the study
- * settled on one free-text reason for asking. Fold every legacy field into
- * the reason it belongs to — the first row that exists, or the notes when
- * there is none — so nothing typed is lost.
+ * Sessions from earlier cuts of this view. Versions 2 and 3 kept a list of
+ * named hypotheses shared across stops, and each stop rated every hypothesis
+ * on its table (with a free-text reason beside it; the first cut had one
+ * "why" and "thinking" per stop). The template now asks its questions per
+ * row, so every rating becomes a row: its reason becomes the row's "why",
+ * prefixed with the hypothesis it was written against, and the numbers
+ * carry over as they were reported at that stop. Notes kept per stop go to
+ * the stop's first row. Nothing typed is lost.
  */
-type LegacyRating = RecallRating & { why?: string }
+interface LegacyRating {
+  reason?: string
+  why?: string
+  likelihood?: number | null
+  support?: number | null
+}
+interface LegacyHypothesis {
+  id: string
+  name: string
+}
+interface LegacyEntry {
+  id: string
+  turns: number[]
+  notes?: string
+  createdAt: string
+  rows?: Array<Omit<RecallRow, "notes"> & { notes?: string }>
+  ratings?: Record<string, LegacyRating>
+  why?: string
+  thinking?: string
+}
+interface LegacySession extends Omit<RecallSession, "version" | "entries"> {
+  hypotheses?: LegacyHypothesis[]
+  entries?: LegacyEntry[]
+}
 
-function migrateEntry(raw: RecallEntry & { why?: string; thinking?: string }): RecallEntry {
-  const { why, thinking, ...entry } = raw
-  const ratings: Record<string, RecallRating> = Object.fromEntries(
-    Object.entries((entry.ratings ?? {}) as Record<string, LegacyRating>).map(([id, rating]) => [
-      id,
-      {
-        reason: joinText(rating.why, rating.reason),
+function migrateEntry(raw: LegacyEntry, hypotheses: LegacyHypothesis[]): RecallEntry {
+  const { why, thinking, ratings, rows, notes, ...entry } = raw
+  const migrated: RecallRow[] = rows ? rows.map((row) => ({ ...row, notes: row.notes ?? "" })) : []
+  if (!rows) {
+    const nameOf = (id: string) => hypotheses.find((hypothesis) => hypothesis.id === id)?.name
+    for (const [id, rating] of Object.entries(ratings ?? {})) {
+      const reason = joinText(rating.why, rating.reason)
+      const name = nameOf(id)
+      migrated.push({
+        id: crypto.randomUUID(),
+        why: name ? (reason ? `${name}: ${reason}` : name) : reason,
+        told: "",
         likelihood: rating.likelihood ?? null,
         support: rating.support ?? null,
-      },
-    ]),
-  )
-  let notes = entry.notes ?? ""
-  if (why?.trim() || thinking?.trim()) {
-    const firstRow = Object.keys(ratings)[0]
-    if (firstRow) {
-      ratings[firstRow] = { ...ratings[firstRow], reason: joinText(ratings[firstRow].reason, why, thinking) }
-    } else {
-      notes = joinText(notes, why?.trim() && `Why: ${why.trim()}`, thinking?.trim() && `Thinking: ${thinking.trim()}`)
+        notes: "",
+      })
+    }
+    const stopLevel = joinText(why, thinking)
+    if (stopLevel) {
+      if (migrated[0]) migrated[0] = { ...migrated[0], why: joinText(stopLevel, migrated[0].why) }
+      else migrated.push({ id: crypto.randomUUID(), why: stopLevel, told: "", likelihood: null, support: null, notes: "" })
     }
   }
-  return { ...entry, notes, ratings }
+  if (notes?.trim()) {
+    if (migrated[0]) migrated[0] = { ...migrated[0], notes: joinText(migrated[0].notes, notes) }
+    else migrated.push({ id: crypto.randomUUID(), why: "", told: "", likelihood: null, support: null, notes: notes.trim() })
+  }
+  return { ...entry, rows: migrated }
 }
 
 export async function saveRecallSession(encounterId: string, session: RecallSession): Promise<void> {
@@ -218,21 +243,6 @@ export function orderedEntries(session: RecallSession): RecallEntry[] {
   return [...session.entries].sort(
     (a, b) => (a.turns[0] ?? 0) - (b.turns[0] ?? 0) || a.createdAt.localeCompare(b.createdAt),
   )
-}
-
-/** The likelihood a hypothesis carries into the entry at `position`: the latest one reported before it. */
-export function carriedLikelihood(ordered: RecallEntry[], position: number, hypothesisId: string): number | null {
-  for (let i = position - 1; i >= 0; i--) {
-    const value = ordered[i].ratings[hypothesisId]?.likelihood
-    if (value !== null && value !== undefined) return value
-  }
-  return null
-}
-
-/** Hypotheses on the table at `position`: those first reported there or earlier. */
-export function hypothesesAt(session: RecallSession, ordered: RecallEntry[], position: number): RecallHypothesis[] {
-  const positionOf = new Map(ordered.map((entry, index) => [entry.id, index] as const))
-  return session.hypotheses.filter((hypothesis) => (positionOf.get(hypothesis.entryId) ?? 0) <= position)
 }
 
 /**
@@ -252,9 +262,10 @@ export function toUtterances(transcript: string): TranscriptTurn[] {
 }
 
 export interface RecallSessionSummary {
-  hypotheses: number
   /** Stops with a table. */
   entries: number
+  /** Rows across every stop. */
+  rows: number
   /** The recall interview has been recorded (audio on this device, or a finished timeline). */
   recorded: boolean
   archivedAt?: string
@@ -271,8 +282,8 @@ export async function getRecallSessionSummary(encounterId: string): Promise<Reca
     getEncounterAudio(recallAudioKey(encounterId)),
   ])
   return {
-    hypotheses: session.hypotheses.length,
     entries: session.entries.length,
+    rows: session.entries.reduce((count, entry) => count + entry.rows.length, 0),
     recorded: Boolean(audio) || Boolean(session.timeline?.stoppedAt),
     archivedAt: session.recallArchivedAt,
   }
@@ -291,8 +302,7 @@ export interface RecallPayloadInput {
 
 /**
  * The session as archived and exported: every entry with the turns it is
- * about and every rating resolved, so a carried-over likelihood is written
- * out with its source rather than left for the reader to trace back.
+ * about and its rows as entered.
  */
 export function buildRecallPayload(input: RecallPayloadInput) {
   const { encounterId, session, turns, exchanges, exchangesDetected, clinicianSpeaker, speakerLabel } = input
@@ -300,16 +310,11 @@ export function buildRecallPayload(input: RecallPayloadInput) {
   const questionTurns = new Set(exchanges.map((exchange) => exchange.question))
   const timeline = session.timeline
   return {
-    schema_version: 3,
+    schema_version: 4,
     encounter_id: encounterId,
     exported_at: new Date().toISOString(),
     clinician_speaker: clinicianSpeaker ?? null,
     exchanges: { source: exchangesDetected ? "model" : "heuristic", ranges: exchanges },
-    hypotheses: session.hypotheses.map((hypothesis) => ({
-      id: hypothesis.id,
-      name: hypothesis.name,
-      first_reported_at_entry: ordered.findIndex((entry) => entry.id === hypothesis.entryId) + 1 || null,
-    })),
     entries: ordered.map((entry, position) => ({
       number: position + 1,
       id: entry.id,
@@ -320,21 +325,14 @@ export function buildRecallPayload(input: RecallPayloadInput) {
         text: turns[index]?.text ?? "",
       })),
       is_question: questionTurns.has(entry.turns[0]),
-      notes: entry.notes,
-      // The template's table, one row per diagnostic hypothesis.
-      rows: hypothesesAt(session, ordered, position).map((hypothesis) => {
-        const rating = entry.ratings[hypothesis.id]
-        const reported = rating?.likelihood ?? null
-        const carried = reported === null ? carriedLikelihood(ordered, position, hypothesis.id) : null
-        return {
-          hypothesis_id: hypothesis.id,
-          hypothesis: hypothesis.name,
-          reason: rating?.reason ?? "",
-          likelihood: reported ?? carried,
-          likelihood_source: reported !== null ? "reported" : carried !== null ? "carried" : null,
-          support: rating?.support ?? null,
-        }
-      }),
+      // The template's table: one row per thought, its fields as entered.
+      rows: entry.rows.map((row) => ({
+        why: row.why,
+        told: row.told,
+        likelihood: row.likelihood,
+        support: row.support,
+        notes: row.notes,
+      })),
       created_at: entry.createdAt,
     })),
     final_diagnosis: session.finalDiagnosis.map((row) => ({

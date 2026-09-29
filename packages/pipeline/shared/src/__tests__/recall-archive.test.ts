@@ -55,6 +55,7 @@ test("recallSessionFromArchive turns the export back into the app's session", ()
   const session = recallSessionFromArchive(payload)
   assert.ok(session)
   assert.equal(session.version, 3)
+  if (session.version !== 3) throw new Error("unreachable")
   assert.deepEqual(session.hypotheses, [
     { id: "h-gerd", name: "Reflux", entryId: "e-1" },
     { id: "h-ibs", name: "IBS", entryId: "e-2" },
@@ -94,4 +95,45 @@ test("the app's own session is left alone", () => {
   assert.equal(recallSessionFromArchive(own), null)
   assert.equal(recallSessionFromArchive(null), null)
   assert.equal(isArchivedRecallPayload(payload), true)
+})
+
+test("a schema 4 export restores rows with the template's fields", () => {
+  const session = recallSessionFromArchive({
+    schema_version: 4,
+    encounter_id: "enc-2",
+    exported_at: "2026-09-28T21:00:00.000Z",
+    clinician_speaker: 0,
+    exchanges: { source: "heuristic", ranges: [] },
+    entries: [
+      {
+        number: 1,
+        id: "e-1",
+        turns: [
+          { index: 2, speaker: 0, speaker_label: "GP", text: "How can I help?" },
+          { index: 3, speaker: 1, speaker_label: "Patient", text: "Tired for months." },
+        ],
+        is_question: true,
+        rows: [
+          { why: "Open question.", told: "Fatigue; perimenopause came to mind.", likelihood: 6, support: 4, notes: "" },
+          { why: "Second thought.", told: "Bowel symptoms don't fit.", likelihood: null, support: null, notes: "Revisit" },
+        ],
+        created_at: "2026-09-28T20:50:00.000Z",
+      },
+    ],
+    final_diagnosis: [],
+    recording: null,
+  })
+  assert.ok(session)
+  assert.equal(session.version, 4)
+  if (session.version !== 4) throw new Error("unreachable")
+  assert.deepEqual(session.entries[0].turns, [2, 3])
+  assert.deepEqual(
+    session.entries[0].rows.map(({ id: _id, ...row }) => row),
+    [
+      { why: "Open question.", told: "Fatigue; perimenopause came to mind.", likelihood: 6, support: 4, notes: "" },
+      { why: "Second thought.", told: "Bowel symptoms don't fit.", likelihood: null, support: null, notes: "Revisit" },
+    ],
+  )
+  assert.equal(session.entries[0].rows[0].id, "row-1-1")
+  assert.equal(session.recallArchivedAt, undefined)
 })
