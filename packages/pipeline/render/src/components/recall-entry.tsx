@@ -14,13 +14,15 @@ import {
 
 /**
  * One stop of the recall interview as a card: the turns it is about, the
- * template's table as a summary of the rows so far, and a form below it
- * that adds a row (clicking a row loads it into the form to change it).
+ * rows so far, and a form below them that adds a row (clicking a row loads
+ * it into the form to change it).
  *
  * A row is what the template asks at a question: why it was asked and
  * whether hypotheses were in mind, what the answer told the clinician, how
  * likely the hypothesis seemed (0–10), how much the answer supported it
- * (−10..+10), and notes. A vague takeaway is a row with text and no numbers.
+ * (−10..+10), and notes. Two of those are paragraphs, so a row is laid out
+ * the way the template reads — question, answer, the ratings, notes — not
+ * as a five-column table. A vague takeaway is a row with text and no numbers.
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
@@ -30,9 +32,9 @@ const BOX =
   "placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
 const NUMBER_BOX =
   BOX + " h-8 w-16 px-1 text-center font-mono font-semibold [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+// The final-diagnosis table below still reads as a table.
 const TH = "pb-1.5 pr-3 text-left align-bottom text-xs font-medium text-muted-foreground"
 const TD = "py-1.5 pr-3 align-top text-[13px] leading-[18px] text-foreground"
-
 export const WHY_QUESTION = "Why did you ask this question / these questions? Did you have specific hypotheses in mind?"
 export const TOLD_QUESTION = "What did the answer(s) tell you? Did it/they suggest specific hypotheses?"
 
@@ -58,6 +60,39 @@ function Field({ label, className, children }: { label: string; className?: stri
       <span className={LABEL}>{label}</span>
       {children}
     </label>
+  )
+}
+
+/** One of the template's questions with its answer; nothing when unanswered. */
+function Answer({ question, text }: { question: string; text: string }) {
+  if (!text) return null
+  return (
+    <div className="mt-2">
+      <p className="text-[11px] leading-4 text-muted-foreground">{question}</p>
+      <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-[18px] text-foreground">{text}</p>
+    </div>
+  )
+}
+
+/** The row's two ratings as chips, or a note that they are still to come. */
+function Ratings({ likelihood, support }: { likelihood: number | null; support: number | null }) {
+  if (likelihood === null && support === null) {
+    return <span className="text-[11px] text-muted-foreground">Not rated yet</span>
+  }
+  const chip = "inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] leading-4"
+  return (
+    <>
+      <span className={chip}>
+        <span className="text-muted-foreground">Likelihood</span>
+        <span className="font-mono font-semibold text-foreground">{likelihood ?? "–"}</span>
+      </span>
+      <span className={chip}>
+        <span className="text-muted-foreground">Support</span>
+        <span className={cn("font-mono font-semibold", support !== null ? supportClass(support) : "text-foreground")}>
+          {support !== null ? formatSupport(support) : "–"}
+        </span>
+      </span>
+    </>
   )
 }
 
@@ -195,46 +230,26 @@ export function RecallEntryCard({
       </header>
 
       <div className="flex flex-col gap-4 border-t border-border px-4 pb-4 pt-3">
-        {/* The template's table: a summary of the rows so far. */}
-        <table className="w-full table-fixed border-collapse">
-          <thead>
-            <tr className="border-b border-border">
-              <th className={TH}>{WHY_QUESTION}</th>
-              <th className={TH}>{TOLD_QUESTION}</th>
-              <th className={cn(TH, "w-[82px] text-center")}>Likelihood (0–10)</th>
-              <th className={cn(TH, "w-[96px] text-center")}>Information support (−10 to +10)</th>
-              <th className={cn(TH, "pr-0")}>Notes</th>
-              {open && <th className="w-6" />}
-            </tr>
-          </thead>
-          <tbody>
-            {entry.rows.length === 0 && (
-              <tr>
-                <td colSpan={open ? 6 : 5} className="py-2 text-xs text-muted-foreground">
-                  No rows yet.
-                </td>
-              </tr>
-            )}
-            {entry.rows.map((row) => (
-              <tr
+        {/* The rows so far, each laid out as the template reads. */}
+        {entry.rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No rows yet.</p>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            {entry.rows.map((row, index) => (
+              <li
                 key={row.id}
                 onClick={open ? () => editRow(row) : undefined}
                 title={open ? "Click to change this row" : undefined}
                 className={cn(
-                  "border-b border-border/60 last:border-b-0",
-                  open && "cursor-pointer hover:bg-accent/60",
-                  editingId === row.id && "bg-brand-soft/50",
+                  "rounded-lg border border-border/70 bg-background px-3 py-2.5",
+                  open && "cursor-pointer hover:border-input",
+                  editingId === row.id && "border-primary bg-brand-soft/40",
                 )}
               >
-                <td className={cn(TD, "whitespace-pre-wrap")}>{row.why}</td>
-                <td className={cn(TD, "whitespace-pre-wrap")}>{row.told}</td>
-                <td className={cn(TD, "text-center font-mono font-semibold")}>{row.likelihood ?? null}</td>
-                <td className={cn(TD, "text-center font-mono font-semibold", row.support !== null && supportClass(row.support))}>
-                  {row.support !== null ? formatSupport(row.support) : null}
-                </td>
-                <td className={cn(TD, "whitespace-pre-wrap pr-0")}>{row.notes}</td>
-                {open && (
-                  <td className="py-1 pl-1 text-right align-top">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 font-mono text-[11px] font-semibold text-muted-foreground">Row {index + 1}</span>
+                  <Ratings likelihood={row.likelihood} support={row.support} />
+                  {open && (
                     <button
                       type="button"
                       onClick={(event) => {
@@ -243,17 +258,20 @@ export function RecallEntryCard({
                         onRemoveRow(row.id)
                       }}
                       title="Remove this row"
-                      className="rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      className="ml-auto rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     >
                       <X className="h-3 w-3" />
-                      <span className="sr-only">Remove row</span>
+                      <span className="sr-only">Remove row {index + 1}</span>
                     </button>
-                  </td>
-                )}
-              </tr>
+                  )}
+                </div>
+                <Answer question={WHY_QUESTION} text={row.why} />
+                <Answer question={TOLD_QUESTION} text={row.told} />
+                <Answer question="Notes" text={row.notes} />
+              </li>
             ))}
-          </tbody>
-        </table>
+          </ol>
+        )}
 
         {/* The form: how a row is added, or changed once clicked. */}
         {open && (
@@ -263,9 +281,6 @@ export function RecallEntryCard({
             </Field>
             <Field label={TOLD_QUESTION}>
               <textarea rows={2} value={form.told} onChange={(event) => setForm({ ...form, told: event.target.value })} className={cn(BOX, "resize-none")} />
-            </Field>
-            <Field label="Notes">
-              <textarea rows={2} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className={cn(BOX, "resize-none")} />
             </Field>
             <div className="flex flex-wrap items-end gap-2.5">
               <Field label="Likelihood 0–10">
@@ -292,16 +307,19 @@ export function RecallEntryCard({
                   className={NUMBER_BOX}
                 />
               </Field>
-              <div className="flex items-center gap-2">
-                <Button type="submit" size="sm" disabled={!canSubmit} className="h-8 rounded-md px-3">
-                  {editingId ? "Save row" : "Add row"}
+            </div>
+            <Field label="Notes">
+              <textarea rows={2} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className={cn(BOX, "resize-none")} />
+            </Field>
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm" disabled={!canSubmit} className="h-8 rounded-md px-3">
+                {editingId ? "Save row" : "Add row"}
+              </Button>
+              {editingId && (
+                <Button type="button" variant="ghost" size="sm" onClick={resetForm} className="h-8 rounded-md px-2">
+                  Cancel
                 </Button>
-                {editingId && (
-                  <Button type="button" variant="ghost" size="sm" onClick={resetForm} className="h-8 rounded-md px-2">
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
           </form>
         )}
