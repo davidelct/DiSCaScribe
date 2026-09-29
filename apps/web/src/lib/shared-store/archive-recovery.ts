@@ -7,6 +7,8 @@
  * That is enough to put the consultation back in the app. What the archive
  * lacks is re-derived or left out:
  * - the recall exchanges are detected again when the recall view opens;
+ * - recall_session.json is the session as exported, turned back into the
+ *   app's own form (see recallSessionFromArchive);
  * - word confidence is rebuilt from raw_transcript.json, and kept only when
  *   the rebuilt text matches transcript.txt (older diarizers laid lines out
  *   differently, and misplaced marks are worse than none);
@@ -15,6 +17,7 @@
  */
 
 import type { Encounter, EncounterMode, NoteVersion, NoteVersionSource } from "@storage/types"
+import { recallSessionFromArchive } from "@pipeline-errors"
 import { transcriptFromDeepgramResponse } from "@transcription"
 import type { StorageClient } from "@/lib/archival"
 
@@ -195,7 +198,7 @@ export async function recoverFromArchive(client: StorageClient, skip: Set<string
       )
       const encounter = encounterFromArchive({ folderId: container.id, folderName: container.name, files })
       if (!encounter) return null
-      const recallSession = parseJson<unknown>(files["recall_session.json"]) ?? undefined
+      const recallSession = recallSessionFromArchive(parseJson<unknown>(files["recall_session.json"])) ?? undefined
       return { encounter, recallSession }
     } catch (error) {
       failed.push({ folder: container.name, error: error instanceof Error ? error.message : String(error) })

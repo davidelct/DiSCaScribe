@@ -1,4 +1,10 @@
-import { parseDiarizedTranscript, type RecallExchangeRange, type TranscriptTurn } from "@pipeline-errors"
+import {
+  isArchivedRecallPayload,
+  parseDiarizedTranscript,
+  recallSessionFromArchive,
+  type RecallExchangeRange,
+  type TranscriptTurn,
+} from "@pipeline-errors"
 import { loadSecureItem, saveSecureItem } from "@storage/secure-storage"
 import { getEncounterAudio } from "@storage/audio-store"
 import {
@@ -124,16 +130,27 @@ type StoredRecallSession = Omit<Partial<RecallSession>, "version"> & { version?:
  */
 async function loadStoredSession(encounterId: string): Promise<StoredRecallSession | null> {
   // The stored version is any past one, so it is read wider than RecallSession's.
-  const local = await loadSecureItem<StoredRecallSession>(storageKey(encounterId))
+  const local = readable(await loadSecureItem<unknown>(storageKey(encounterId)))
   const shared = await fetchSharedRecallSession(encounterId)
   if (shared.status !== "ok") return local
-  const remote = shared.value.session as StoredRecallSession | null
+  const stored = shared.value.session
+  const remote = readable(stored)
   if (local && (!remote || recallSessionUnsynced(encounterId))) {
     void putSharedRecallSession(encounterId, local)
     return local
   }
-  if (remote) void saveSecureItem(storageKey(encounterId), remote)
+  if (remote) {
+    void saveSecureItem(storageKey(encounterId), remote)
+    // A session recovered from the archive in its exported form: store it back as the app's own.
+    if (isArchivedRecallPayload(stored)) void putSharedRecallSession(encounterId, remote)
+  }
   return remote
+}
+
+/** A stored session in the app's form; one restored from the archive in its exported form is converted. */
+function readable(stored: unknown): StoredRecallSession | null {
+  if (!stored) return null
+  return recallSessionFromArchive(stored) ?? (stored as StoredRecallSession)
 }
 
 export async function loadRecallSession(encounterId: string): Promise<RecallSession> {

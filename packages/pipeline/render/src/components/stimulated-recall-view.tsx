@@ -41,6 +41,9 @@ import {
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
 
+/** How long after the last edit the archive's copy of the session is refreshed. */
+const ARCHIVE_DELAY_MS = 30_000
+
 const CARD = "rounded-2xl border border-border bg-card shadow-soft"
 
 const PROMPT =
@@ -134,6 +137,18 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   const [loaded, setLoaded] = useState(false)
   const sessionRef = useRef(session)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The archive's copy (recall_session.json in Box, what recovery rebuilds
+  // from) follows the edits too, a while after the last one rather than
+  // only when a recording stops. Set up below, once the payload exists.
+  const archiveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const archiveSessionRef = useRef<(options: { keepalive: boolean }) => void>(() => undefined)
+  const scheduleArchive = useCallback(() => {
+    if (archiveTimer.current) clearTimeout(archiveTimer.current)
+    archiveTimer.current = setTimeout(() => {
+      archiveTimer.current = null
+      archiveSessionRef.current({ keepalive: false })
+    }, ARCHIVE_DELAY_MS)
+  }, [])
   const update = useCallback(
     (updater: (current: RecallSession) => RecallSession) => {
       const next = updater(sessionRef.current)
@@ -144,18 +159,29 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
         saveTimer.current = null
         void saveRecallSession(encounter.id, next)
       }, 300)
+      scheduleArchive()
     },
-    [encounter.id],
+    [encounter.id, scheduleArchive],
   )
-  // A pending save is flushed when the view leaves or switches encounter.
+  // Pending saves are flushed when the view leaves or switches encounter,
+  // and the archive's copy when the page is closed.
   useEffect(() => {
     const id = encounter.id
+    const flushArchive = () => {
+      if (!archiveTimer.current) return
+      clearTimeout(archiveTimer.current)
+      archiveTimer.current = null
+      archiveSessionRef.current({ keepalive: true })
+    }
+    window.addEventListener("pagehide", flushArchive)
     return () => {
+      window.removeEventListener("pagehide", flushArchive)
       if (saveTimer.current) {
         clearTimeout(saveTimer.current)
         saveTimer.current = null
         void saveRecallSession(id, sessionRef.current)
       }
+      flushArchive()
     }
   }, [encounter.id])
 
@@ -435,7 +461,36 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     [analysisFresh, clinicianSpeaker, encounter.id, exchanges, speakerLabel, turns],
   )
 
+  // Refreshes the archive's copy of the session alone; the recording goes
+  // up when it stops (uploadRecall). Quiet: a failed refresh is retried
+  // with the next edit, and the stop's archive carries the latest session.
+  const recordingRef = useRef(false)
+  const archiveConfiguredRef = useRef(true)
+  useEffect(() => {
+    archiveSessionRef.current = ({ keepalive }) => {
+      // While recording, the stop archives the session with the recording.
+      if (recordingRef.current || !archiveConfiguredRef.current) return
+      const current = sessionRef.current
+      if (current.entries.length === 0 && current.hypotheses.length === 0 && current.finalDiagnosis.length === 0) return
+      const formData = new FormData()
+      formData.append("encounter_id", encounter.id)
+      formData.append("created_at", encounter.created_at)
+      formData.append("session", JSON.stringify(sessionPayload()))
+      // keepalive lets the request outlive a closing page, but browsers cap
+      // its body at 64 KB; a larger session is sent without it.
+      void fetch("/api/archive/recall", { method: "POST", body: formData, keepalive })
+        .catch(() => (keepalive ? fetch("/api/archive/recall", { method: "POST", body: formData }) : null))
+        .then(async (res) => {
+          if (!res?.ok) return
+          const data = (await res.json().catch(() => null)) as { skipped?: boolean } | null
+          if (data?.skipped) archiveConfiguredRef.current = false
+        })
+        .catch(() => undefined)
+    }
+  }, [encounter.created_at, encounter.id, sessionPayload])
+
   const startRecall = async () => {
+    recordingRef.current = true
     try {
       await recorder.startRecording()
       // Fresh timeline per take: a re-record replaces the audio, so it
@@ -445,6 +500,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       runningSinceRef.current = performance.now()
       setRecallStatus("recording")
     } catch {
+      recordingRef.current = false
       setRecallStatus("failed")
     }
   }
@@ -464,6 +520,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
 
   const uploadRecall = useCallback(
     async (audioBlob: Blob | null) => {
+      // This upload carries the session; a refresh already queued is redundant.
+      if (archiveTimer.current) {
+        clearTimeout(archiveTimer.current)
+        archiveTimer.current = null
+      }
       setRecallStatus("saving")
       try {
         const formData = new FormData()
@@ -488,6 +549,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           return
         }
         update((current) => ({ ...current, recallArchivedAt: new Date().toISOString() }))
+        // That mark is not an edit: the archive already has this session.
+        if (archiveTimer.current) {
+          clearTimeout(archiveTimer.current)
+          archiveTimer.current = null
+        }
         recallBlobRef.current = null
         setRecallStatus("archived")
       } catch {
@@ -517,6 +583,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       setRecallAudioVersion((version) => version + 1)
     }
     await uploadRecall(blob)
+    recordingRef.current = false
   }
 
   const exportSession = () => {
