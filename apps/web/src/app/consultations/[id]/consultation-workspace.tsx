@@ -49,6 +49,7 @@ import {
   debugLogPHI,
   debugError,
   debugWarn,
+  getEncounterAudio,
   saveEncounterAudio,
   loadByokApiKeys,
   writeAuditEntry,
@@ -199,6 +200,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   const [transcriptionStatus, setTranscriptionStatus] = useState<StepStatus>("pending")
   const [noteGenerationStatus, setNoteGenerationStatus] = useState<StepStatus>("pending")
   const [transcriptionErrorMessage, setTranscriptionErrorMessage] = useState("")
+  const [storedRecordingError, setStoredRecordingError] = useState("")
   const [sessionId, setSessionId] = useState<string | null>(null)
   // Whether the active transcription provider streams live segments during
   // recording. Deepgram (the only provider) is final-pass only, so this
@@ -1080,7 +1082,29 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     }
   }
 
+  // A recording reopened after a reload (or a failed run) has no capture in
+  // memory: transcribe the copy in the audio store instead, as an upload.
+  const handleTranscribeStoredRecording = async () => {
+    if (!encounter) return
+    setStoredRecordingError("")
+    const blob = await getEncounterAudio(encounter.id)
+    if (!blob) {
+      setStoredRecordingError(
+        "The recording isn't stored in this browser. Open this consultation on the device that recorded it.",
+      )
+      return
+    }
+    const extension = blob.type.includes("mpeg") ? "mp3" : "wav"
+    await handleUploadRecording(
+      new File([blob], `${encounter.id}-recording.${extension}`, { type: blob.type || "audio/wav" }),
+    )
+  }
+
   const handleRetryTranscription = async () => {
+    if (!finalRecordingRef.current || !sessionIdRef.current) {
+      await handleTranscribeStoredRecording()
+      return
+    }
     const blob = finalRecordingRef.current
     const activeSessionId = sessionIdRef.current
     if (!blob || !activeSessionId || !encounter) return
@@ -1166,7 +1190,11 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     : { href: "/consultations", label: "Consultations" }
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const hasNote = Boolean(encounter.note_text?.trim())
-  const showReady = !live && !hasTranscript && !hasNote
+  // A consultation that was recorded but never transcribed (a failed run, or
+  // a page closed mid-upload) still has its recording: offer that, not a
+  // fresh start that would record over it.
+  const untranscribedRecording = !live && !hasTranscript && !hasNote && Boolean(encounter.recording_duration)
+  const showReady = !live && !hasTranscript && !hasNote && !untranscribedRecording
 
   const liveState =
     live === "recording"
@@ -1188,7 +1216,16 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             onRetryTranscription: handleRetryTranscription,
             onRetryNoteGeneration: handleRetryNoteGeneration,
           }
-        : undefined
+        : untranscribedRecording
+          ? {
+              phase: "processing" as const,
+              transcriptionStatus: "failed" as const,
+              noteGenerationStatus: "pending" as const,
+              transcriptionErrorMessage: storedRecordingError || "This recording hasn't been transcribed.",
+              onRetryTranscription: () => void handleTranscribeStoredRecording(),
+              onRetryNoteGeneration: handleRetryNoteGeneration,
+            }
+          : undefined
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">

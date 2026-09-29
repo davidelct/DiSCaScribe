@@ -119,15 +119,11 @@ export async function POST(req: NextRequest) {
       const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
 
-      if (isBlankTranscript(transcript)) {
-        const message = "No detectable speech in the uploaded file. Check the audio and try again."
-        transcriptionSessionStore.emitError(sessionId, createPipelineError("blank_audio", message, true))
-        return jsonError(422, "blank_audio", message, true)
-      }
-
       // Phase 1 of archival: upload the audio + raw Deepgram JSON + transcript
       // from this request (which holds the bytes), so archival stays correct on
-      // serverless. Best-effort — never fails the transcription.
+      // serverless. Best-effort — never fails the transcription. Runs before
+      // the blank check too: a recording that came back without speech is the
+      // one worth listening to, and this request is its only way into the archive.
       // Must complete BEFORE the final transcript is pushed to the client: the
       // client triggers phase 2 (metadata manifest) on that event, and the
       // manifest lists whichever artifacts are already in the container.
@@ -139,7 +135,7 @@ export async function POST(req: NextRequest) {
               client: archival.client,
               encounterId,
               createdAt,
-              transcriptText: transcript,
+              transcriptText: isBlankTranscript(transcript) ? "" : transcript,
               rawTranscript: detail.raw,
               audio: { buffer, contentType, filename },
             })
@@ -147,6 +143,12 @@ export async function POST(req: NextRequest) {
             console.error("[archival] phase-1 archive failed (upload)", archiveError)
           }
         }
+      }
+
+      if (isBlankTranscript(transcript)) {
+        const message = "No detectable speech in the uploaded file. Check the audio and try again."
+        transcriptionSessionStore.emitError(sessionId, createPipelineError("blank_audio", message, true))
+        return jsonError(422, "blank_audio", message, true)
       }
 
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript, detail.words)

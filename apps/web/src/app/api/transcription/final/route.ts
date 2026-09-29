@@ -128,6 +128,34 @@ export async function POST(req: NextRequest) {
       )
       const transcript = detail.text
       const latencyMs = Date.now() - startedAtMs
+      // Phase 1 of archival: upload the audio + raw Deepgram JSON + transcript
+      // from *this* request, which holds the bytes. Doing it here (rather than
+      // stashing in memory for a later request) keeps archival correct on
+      // serverless, where the later request may hit a different instance.
+      // Best-effort — an archival failure never affects transcription. Must
+      // complete BEFORE the final transcript is pushed to the client: the
+      // client triggers phase 2 (metadata manifest) on that event, and the
+      // manifest lists whichever artifacts are already in the container. Runs
+      // before the blank check too: a recording that came back without speech
+      // is the one worth listening to, and this request is its only way in.
+      if (encounterId) {
+        const archival = getArchivalConfig(keys.role)
+        if (archival.enabled) {
+          try {
+            await archiveTranscriptionArtifacts({
+              client: archival.client,
+              encounterId,
+              createdAt,
+              transcriptText: isBlankTranscript(transcript) ? "" : transcript,
+              rawTranscript: detail.raw,
+              audio: { buffer: Buffer.from(arrayBuffer), contentType: "audio/wav", filename: "audio.wav" },
+            })
+          } catch (archiveError) {
+            console.error("[archival] phase-1 archive failed (recording)", archiveError)
+          }
+        }
+      }
+
       if (isBlankTranscript(transcript)) {
         const message = "No detectable speech signal in the recording. Check microphone input/device and retry."
         transcriptionSessionStore.emitError(sessionId, createPipelineError("blank_audio", message, true))
@@ -139,32 +167,6 @@ export async function POST(req: NextRequest) {
           durationMs: wavInfo.durationMs,
         })
       }
-      // Phase 1 of archival: upload the audio + raw Deepgram JSON + transcript
-      // from *this* request, which holds the bytes. Doing it here (rather than
-      // stashing in memory for a later request) keeps archival correct on
-      // serverless, where the later request may hit a different instance.
-      // Best-effort — an archival failure never affects transcription. Must
-      // complete BEFORE the final transcript is pushed to the client: the
-      // client triggers phase 2 (metadata manifest) on that event, and the
-      // manifest lists whichever artifacts are already in the container.
-      if (encounterId) {
-        const archival = getArchivalConfig(keys.role)
-        if (archival.enabled) {
-          try {
-            await archiveTranscriptionArtifacts({
-              client: archival.client,
-              encounterId,
-              createdAt,
-              transcriptText: transcript,
-              rawTranscript: detail.raw,
-              audio: { buffer: Buffer.from(arrayBuffer), contentType: "audio/wav", filename: "audio.wav" },
-            })
-          } catch (archiveError) {
-            console.error("[archival] phase-1 archive failed (recording)", archiveError)
-          }
-        }
-      }
-
       transcriptionSessionStore.setFinalTranscript(sessionId, transcript, detail.words)
 
       // Audit log: final transcription completed
