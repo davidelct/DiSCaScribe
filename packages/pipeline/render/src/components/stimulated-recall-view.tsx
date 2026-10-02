@@ -103,13 +103,18 @@ function Scale({ title, labels, minorEvery, ends }: { title: string; labels: str
   )
 }
 
-/** One of the verbal scales: its anchors in order along a line, as Olga's note lists them. */
+/**
+ * One of the verbal scales: its anchors in order along a line, as Olga's
+ * note lists them. One row per scale, the title beside the line rather than
+ * above it, so the three together take no more of the page than the two
+ * numeric drawings do.
+ */
 function VerbalScale({ title, anchors }: { title: string; anchors: readonly string[] }) {
   const inset = `${50 / anchors.length}%`
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-semibold text-foreground">{title}</span>
-      <div className="relative flex">
+    <div className="flex items-start gap-3">
+      <span className="w-[168px] shrink-0 text-xs font-semibold leading-4 text-foreground">{title}</span>
+      <div className="relative flex min-w-0 flex-1">
         <span aria-hidden className="absolute top-[5px] h-px bg-foreground/40" style={{ left: inset, right: inset }} />
         {anchors.map((anchor) => (
           <div key={anchor} className="flex flex-1 flex-col items-center">
@@ -707,10 +712,15 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           </div>
         </div>
         {promptOpen && (
-          <div className="grid gap-x-10 gap-y-4 border-t border-border px-5 py-4 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-center">
+          <div
+            className={cn(
+              "grid gap-x-10 gap-y-4 border-t border-border px-5 py-4 lg:items-center",
+              session.scale === "verbal" ? "lg:grid-cols-[minmax(0,1fr)_600px]" : "lg:grid-cols-[minmax(0,1fr)_520px]",
+            )}
+          >
             <p className="text-[13.5px] leading-[21px] text-foreground/90">{PROMPT}</p>
             {session.scale === "verbal" ? (
-              <div className="grid gap-5">
+              <div className="grid gap-2.5">
                 <VerbalScale title="Likelihood" anchors={VERBAL_ANCHORS.likelihood} />
                 <VerbalScale title="Information support" anchors={VERBAL_ANCHORS.support} />
                 <VerbalScale title="How difficult was the case?" anchors={VERBAL_ANCHORS.difficulty} />

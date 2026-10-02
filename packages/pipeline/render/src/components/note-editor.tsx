@@ -518,7 +518,12 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
               className={cn(CARD, "px-5 py-3.5")}
             />
           ) : (
-            <AudioPlayer audioKey={encounter.id} placeholder={Boolean(live)} className={cn(CARD, "px-5 py-3.5")} />
+            <AudioPlayer
+              audioKey={encounter.id}
+              placeholder={Boolean(live)}
+              downloadName={`consultation_${encounter.id}`}
+              className={cn(CARD, "px-5 py-3.5")}
+            />
           )}
 
           {/* Transcript: a collapsible card. */}

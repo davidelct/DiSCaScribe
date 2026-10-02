@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
-import { Play, Pause } from "lucide-react"
+import { Download, Play, Pause } from "lucide-react"
 import { getEncounterAudio } from "@storage"
 import { cn } from "@ui/lib/utils"
 import { Skeleton } from "@ui/lib/ui/skeleton"
@@ -16,6 +16,12 @@ interface AudioPlayerProps {
    * audio row never disappears from its slot.
    */
   placeholder?: boolean
+  /**
+   * Offer the recording as a file, named this (the extension follows the
+   * stored audio's type). Lets a consultation's recording be taken to another
+   * browser, or uploaded again as a new consultation.
+   */
+  downloadName?: string
 }
 
 // Match the live recording waveform's bar look: ~5px rounded bars, 3px gaps.
@@ -39,6 +45,26 @@ function easeOutCubic(t: number): number {
 
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+}
+
+/** The file extension for a recording's MIME type, as the archive names its files (WAV when unknown). */
+function audioExtension(mimeType: string): string {
+  const subtype = (mimeType.split(";")[0].split("/")[1] ?? "").trim().toLowerCase()
+  if (!subtype) return "wav"
+  const known: Record<string, string> = {
+    mpeg: "mp3",
+    mp3: "mp3",
+    wav: "wav",
+    "x-wav": "wav",
+    wave: "wav",
+    webm: "webm",
+    mp4: "m4a",
+    "x-m4a": "m4a",
+    aac: "m4a",
+    ogg: "ogg",
+    flac: "flac",
+  }
+  return known[subtype] ?? subtype
 }
 
 function formatTime(seconds: number): string {
@@ -88,9 +114,11 @@ function drawRoundedBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
  * Listen back to a consultation recording. Loads the stored audio for an
  * encounter and renders a waveform scrubber that echoes the recording view:
  * played bars are solid, the rest are faded. Renders nothing when the encounter
- * has no stored recording (e.g. consultations from before this feature).
+ * has no stored recording (e.g. consultations from before this feature). With
+ * a download name, a download button at the end of the row saves the stored
+ * audio as a file.
  */
-export function AudioPlayer({ audioKey, className, placeholder = false }: AudioPlayerProps) {
+export function AudioPlayer({ audioKey, className, placeholder = false, downloadName }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const peaksRef = useRef<number[] | null>(null)
@@ -101,6 +129,7 @@ export function AudioPlayer({ audioKey, className, placeholder = false }: AudioP
   const colorRef = useRef<string | null>(null)
   const [available, setAvailable] = useState<boolean | null>(null)
   const [url, setUrl] = useState<string | null>(null)
+  const [mimeType, setMimeType] = useState("")
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -225,6 +254,7 @@ export function AudioPlayer({ audioKey, className, placeholder = false }: AudioP
       }
       objectUrl = URL.createObjectURL(blob)
       setUrl(objectUrl)
+      setMimeType(blob.type)
       setAvailable(true)
       try {
         const arrayBuffer = await blob.arrayBuffer()
@@ -381,6 +411,18 @@ export function AudioPlayer({ audioKey, className, placeholder = false }: AudioP
       <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatTime(currentTime)} / {formatTime(duration)}
       </span>
+
+      {downloadName && url && (
+        <a
+          href={url}
+          download={`${downloadName}.${audioExtension(mimeType)}`}
+          title="Download recording"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <Download className="h-4 w-4" />
+          <span className="sr-only">Download recording</span>
+        </a>
+      )}
     </div>
   )
 }
