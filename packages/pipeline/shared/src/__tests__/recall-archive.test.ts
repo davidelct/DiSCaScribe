@@ -137,3 +137,76 @@ test("a schema 4 export restores rows with the template's fields", () => {
   assert.equal(session.entries[0].rows[0].id, "row-1-1")
   assert.equal(session.recallArchivedAt, undefined)
 })
+
+test("a schema 5 export restores the scales its ratings were given on", () => {
+  const session = recallSessionFromArchive({
+    schema_version: 5,
+    encounter_id: "enc-3",
+    exported_at: "2026-10-01T09:00:00.000Z",
+    clinician_speaker: 0,
+    exchanges: { source: "heuristic", ranges: [] },
+    scales: {
+      kind: "verbal",
+      likelihood: ["Unlikely", "Somewhat unlikely", "Somewhat likely", "Very likely"],
+      support: ["Rejects", "Reduces the chance", "No change", "Increases the chance", "Confirms"],
+      difficulty: ["Very straightforward", "Somewhat straightforward", "Moderately difficult", "Very difficult"],
+    },
+    entries: [
+      {
+        number: 1,
+        id: "e-1",
+        turns: [{ index: 1, speaker: 0, speaker_label: "GP", text: "Any fever?" }],
+        is_question: true,
+        rows: [
+          { why: "Rule out infection.", told: "None.", likelihood: "Somewhat unlikely", support: "Reduces the chance", notes: "" },
+          { why: "Still vague.", told: "", likelihood: null, support: null, notes: "" },
+        ],
+        created_at: "2026-10-01T08:50:00.000Z",
+      },
+    ],
+    final_diagnosis: [{ diagnosis: "Viral", likelihood: "Very likely", why: "Fits", difficulty: "Somewhat straightforward" }],
+    recording: null,
+  })
+  assert.ok(session)
+  assert.equal(session.version, 5)
+  if (session.version !== 5) throw new Error("unreachable")
+  assert.equal(session.scale, "verbal")
+  assert.deepEqual(
+    session.entries[0].rows.map(({ id: _id, ...row }) => row),
+    [
+      { why: "Rule out infection.", told: "None.", likelihood: "Somewhat unlikely", support: "Reduces the chance", notes: "" },
+      { why: "Still vague.", told: "", likelihood: null, support: null, notes: "" },
+    ],
+  )
+  assert.deepEqual(session.finalDiagnosis, [
+    { id: "final-1", diagnosis: "Viral", likelihood: "Very likely", why: "Fits", difficulty: "Somewhat straightforward" },
+  ])
+})
+
+test("a schema 5 export on the numeric scales keeps its numbers", () => {
+  const session = recallSessionFromArchive({
+    schema_version: 5,
+    encounter_id: "enc-4",
+    exported_at: "2026-10-01T09:00:00.000Z",
+    clinician_speaker: 0,
+    exchanges: { source: "heuristic", ranges: [] },
+    scales: { kind: "numeric", likelihood: { min: 0, max: 10 }, support: { min: -10, max: 10 }, difficulty: "free text" },
+    entries: [
+      {
+        number: 1,
+        id: "e-1",
+        turns: [{ index: 1, speaker: 0, speaker_label: "GP", text: "Any fever?" }],
+        is_question: true,
+        rows: [{ why: "Infection?", told: "None.", likelihood: 3, support: -4, notes: "" }],
+        created_at: "2026-10-01T08:50:00.000Z",
+      },
+    ],
+    final_diagnosis: [],
+    recording: null,
+  })
+  assert.ok(session)
+  if (session.version !== 5) throw new Error("unreachable")
+  assert.equal(session.scale, "numeric")
+  assert.equal(session.entries[0].rows[0].likelihood, 3)
+  assert.equal(session.entries[0].rows[0].support, -4)
+})

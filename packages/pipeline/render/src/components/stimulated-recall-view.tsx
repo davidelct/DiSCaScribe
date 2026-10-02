@@ -7,18 +7,22 @@ import { useAudioRecorder, compressAudioFileToMp3 } from "@audio"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
 import { guessClinicianSpeaker, heuristicRecallExchanges } from "@pipeline-errors"
-import { Check, Download, Loader2, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
+import { Check, Download, Loader2, Lock, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
 import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
 import { FinalDiagnosisCard, RecallEntryCard, type EntryRowInput } from "./recall-entry"
 import {
+  VERBAL_ANCHORS,
   buildRecallPayload,
   emptyRecallSession,
   loadRecallSession,
   orderedEntries,
   recallAudioKey,
+  rememberRecallScale,
   saveRecallSession,
+  sessionHasRatings,
   toUtterances,
+  type RatingScale,
   type RecallEntry,
   type RecallSession,
 } from "./recall-session"
@@ -33,8 +37,10 @@ import {
  * stop in transcript order: a row per thought, each answering why the
  * question was asked and what the answer told the clinician, with the
  * hypothesis's likelihood and how much the answer supported it, plus notes.
- * The recall interview can be recorded alongside, with every turn click
- * timed against the recording.
+ * The ratings are given on the numeric scales or on verbal anchors, chosen
+ * per session (above the prompt) until the first rating fixes it. The
+ * recall interview can be recorded alongside, with every turn click timed
+ * against the recording.
  */
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
@@ -56,7 +62,9 @@ function formatDuration(seconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`
 }
 
-/** One of the two rating scales, drawn as the paper form draws it. */
+const SCALE_NAMES: Record<RatingScale, string> = { numeric: "Numerical scales", verbal: "Verbal scales" }
+
+/** One of the numeric rating scales, drawn as the paper form draws it. */
 function Scale({ title, labels, minorEvery, ends }: { title: string; labels: string[]; minorEvery: number; ends: string[] }) {
   const count = labels.length
   const step = 100 / (count - 1)
@@ -91,6 +99,67 @@ function Scale({ title, labels, minorEvery, ends }: { title: string; labels: str
           <span key={end}>{end}</span>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** One of the verbal scales: its anchors in order along a line, as Olga's note lists them. */
+function VerbalScale({ title, anchors }: { title: string; anchors: readonly string[] }) {
+  const inset = `${50 / anchors.length}%`
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-foreground">{title}</span>
+      <div className="relative flex">
+        <span aria-hidden className="absolute top-[5px] h-px bg-foreground/40" style={{ left: inset, right: inset }} />
+        {anchors.map((anchor) => (
+          <div key={anchor} className="flex flex-1 flex-col items-center">
+            <span aria-hidden className="mt-px h-[9px] w-px bg-foreground/40" />
+            <span className="mt-1 px-1 text-center text-[10.5px] leading-[13px] text-muted-foreground">{anchor}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The choice of scales, numeric or verbal, for the session. Once a rating
+ * has been given the choice is fixed: a session is wholly on one set, so
+ * the two can be compared; the ratings would have to be removed to change.
+ */
+function ScaleChoice({ value, locked, onChange }: { value: RatingScale; locked: boolean; onChange: (scale: RatingScale) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Rating scales"
+      title={
+        locked
+          ? "Ratings have been given on these scales; remove them to change the scales"
+          : "The scales this recall's ratings are given on"
+      }
+      className="inline-flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5"
+    >
+      {(Object.keys(SCALE_NAMES) as RatingScale[]).map((scale) => {
+        const checked = scale === value
+        return (
+          <button
+            key={scale}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            disabled={locked && !checked}
+            onClick={() => onChange(scale)}
+            className={cn(
+              "rounded px-2 py-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              checked ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground",
+            )}
+          >
+            {SCALE_NAMES[scale]}
+          </button>
+        )
+      })}
+      {locked && <Lock aria-hidden className="mx-1 h-3 w-3 text-muted-foreground" />}
     </div>
   )
 }
@@ -331,6 +400,15 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
 
   const clearSelection = () => setSelected([])
 
+  // The scales are chosen before the first rating and remembered for the
+  // next session; the choice is saved with the session like any edit.
+  const scaleLocked = sessionHasRatings(session)
+  const chooseScale = (scale: RatingScale) => {
+    if (scale === session.scale || scaleLocked) return
+    rememberRecallScale(scale)
+    update((current) => ({ ...current, scale }))
+  }
+
   // Escape clears the selection, or closes the open table when nothing is selected.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -565,6 +643,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           >
             {promptOpen ? "Hide" : "Show"}
           </button>
+          {loaded && <ScaleChoice value={session.scale} locked={scaleLocked} onChange={chooseScale} />}
           <div className="ml-auto flex items-center gap-2">
             {recallStatus === "recording" ? (
               <span className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card pl-2.5 pr-1">
@@ -630,20 +709,28 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
         {promptOpen && (
           <div className="grid gap-x-10 gap-y-4 border-t border-border px-5 py-4 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-center">
             <p className="text-[13.5px] leading-[21px] text-foreground/90">{PROMPT}</p>
-            <div className="grid gap-8 sm:grid-cols-2">
-              <Scale
-                title="Likelihood"
-                labels={["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]}
-                minorEvery={1}
-                ends={["Highly unlikely", "Highly likely"]}
-              />
-              <Scale
-                title="Information support"
-                labels={["−10", "−5", "0", "+5", "+10"]}
-                minorEvery={5}
-                ends={["Rules out", "No effect", "Confirms"]}
-              />
-            </div>
+            {session.scale === "verbal" ? (
+              <div className="grid gap-5">
+                <VerbalScale title="Likelihood" anchors={VERBAL_ANCHORS.likelihood} />
+                <VerbalScale title="Information support" anchors={VERBAL_ANCHORS.support} />
+                <VerbalScale title="How difficult was the case?" anchors={VERBAL_ANCHORS.difficulty} />
+              </div>
+            ) : (
+              <div className="grid gap-8 sm:grid-cols-2">
+                <Scale
+                  title="Likelihood"
+                  labels={["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]}
+                  minorEvery={1}
+                  ends={["Highly unlikely", "Highly likely"]}
+                />
+                <Scale
+                  title="Information support"
+                  labels={["−10", "−5", "0", "+5", "+10"]}
+                  minorEvery={5}
+                  ends={["Rules out", "No effect", "Confirms"]}
+                />
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -738,6 +825,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 key={view.entry.id}
                 number={view.number}
                 entry={view.entry}
+                scale={session.scale}
                 excerpt={view.excerpt}
                 open={view.entry.id === activeId}
                 onOpen={() => activateEntry(view.entry.id, true)}
@@ -753,6 +841,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
             ))}
             <FinalDiagnosisCard
               rows={session.finalDiagnosis}
+              scale={session.scale}
               onChange={(rows) => update((current) => ({ ...current, finalDiagnosis: rows }))}
             />
           </section>

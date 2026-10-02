@@ -7,6 +7,7 @@ import {
 } from "@pipeline-errors"
 import { loadSecureItem, saveSecureItem } from "@storage/secure-storage"
 import { getEncounterAudio } from "@storage/audio-store"
+import { getPreferences, setPreferences } from "@storage/preferences"
 import {
   fetchSharedRecallSession,
   putSharedRecallSession,
@@ -22,13 +23,47 @@ import {
  * template: a table with one row per thought, where a row answers "why did
  * you ask this question / these questions? did you have specific hypotheses
  * in mind?", "what did the answer(s) tell you? did it/they suggest specific
- * hypotheses?", gives a likelihood (0–10) and an information support
- * (−10..+10), and takes notes. A vague takeaway is a row with the text and
- * no numbers; the numbers come once a hypothesis has formed, which may be a
- * later row at a later stop. Sessions are persisted per encounter in the
- * shared store when the server has one (so the recall can be reviewed from
- * any laptop), with the encrypted local store as a mirror.
+ * hypotheses?", rates the hypothesis's likelihood and the answer's
+ * information support, and takes notes. A vague takeaway is a row with the
+ * text and no ratings; the ratings come once a hypothesis has formed, which
+ * may be a later row at a later stop. The ratings are given on one of two
+ * scale sets, chosen per session (see RatingScale). Sessions are persisted
+ * per encounter in the shared store when the server has one (so the recall
+ * can be reviewed from any laptop), with the encrypted local store as a
+ * mirror.
  */
+
+/**
+ * The rating scales a session uses, being trialled side by side. Numeric:
+ * likelihood 0–10, information support −10..+10, the case's difficulty as
+ * free text. Verbal: Olga Kostopoulou's anchors (September 2026), four for
+ * likelihood and difficulty, five for support. The choice is made before
+ * any rating is given and then fixed for the session, so a session is
+ * wholly on one set; the export records which.
+ */
+export type RatingScale = "numeric" | "verbal"
+
+/** A rating as given: a number on the numeric scales, the anchor's label on the verbal ones. */
+export type Rating = number | string
+
+export const LIKELIHOOD_RANGE = { min: 0, max: 10 } as const
+export const SUPPORT_RANGE = { min: -10, max: 10 } as const
+
+/** The verbal anchors, each scale's in ascending order. Stored and exported as written here. */
+export const VERBAL_ANCHORS: Record<"likelihood" | "support" | "difficulty", readonly string[]> = {
+  likelihood: ["Unlikely", "Somewhat unlikely", "Somewhat likely", "Very likely"],
+  support: ["Rejects", "Reduces the chance", "No change", "Increases the chance", "Confirms"],
+  difficulty: ["Very straightforward", "Somewhat straightforward", "Moderately difficult", "Very difficult"],
+}
+
+/** Which way a support rating points: against the hypothesis (−1), neither (0), or for it (1). */
+export function supportDirection(value: Rating): -1 | 0 | 1 {
+  if (typeof value === "number") return value > 0 ? 1 : value < 0 ? -1 : 0
+  const index = VERBAL_ANCHORS.support.indexOf(value)
+  if (index < 0) return 0
+  const middle = (VERBAL_ANCHORS.support.length - 1) / 2
+  return index > middle ? 1 : index < middle ? -1 : 0
+}
 
 /** One row of a stop's table. */
 export interface RecallRow {
@@ -37,10 +72,10 @@ export interface RecallRow {
   why: string
   /** "What did the answer(s) tell you? Did it/they suggest specific hypotheses?" */
   told: string
-  /** 0–10; null until a hypothesis has formed enough to rate. */
-  likelihood: number | null
-  /** −10..+10; null until rated. */
-  support: number | null
+  /** On the session's likelihood scale; null until a hypothesis has formed enough to rate. */
+  likelihood: Rating | null
+  /** On the session's support scale; null until rated. */
+  support: Rating | null
   notes: string
 }
 
@@ -55,8 +90,9 @@ export interface RecallEntry {
 export interface FinalDiagnosisRow {
   id: string
   diagnosis: string
-  likelihood: number | null
+  likelihood: Rating | null
   why: string
+  /** How difficult the case was: free text on the numeric scales, an anchor on the verbal ones. */
   difficulty: string
 }
 
@@ -84,7 +120,9 @@ export interface RecallTimeline {
 }
 
 export interface RecallSession {
-  version: 4
+  version: 5
+  /** The scales every rating in the session is given on. */
+  scale: RatingScale
   entries: RecallEntry[]
   finalDiagnosis: FinalDiagnosisRow[]
   /** Timing of the recall recording (replaced on re-record). */
@@ -93,11 +131,29 @@ export interface RecallSession {
   recallArchivedAt?: string
 }
 
-export const LIKELIHOOD_RANGE = { min: 0, max: 10 } as const
-export const SUPPORT_RANGE = { min: -10, max: 10 } as const
+export function emptyRecallSession(scale: RatingScale = "numeric"): RecallSession {
+  return { version: 5, scale, entries: [], finalDiagnosis: [] }
+}
 
-export function emptyRecallSession(): RecallSession {
-  return { version: 4, entries: [], finalDiagnosis: [] }
+/**
+ * The scales a new session starts on: those last chosen in this browser,
+ * numeric until a choice is made. A run of interviews on one set then needs
+ * the choice once; each session keeps its own afterwards.
+ */
+export function rememberedRecallScale(): RatingScale {
+  return getPreferences().recallScale === "verbal" ? "verbal" : "numeric"
+}
+
+export function rememberRecallScale(scale: RatingScale): void {
+  void setPreferences({ recallScale: scale }).catch(() => undefined)
+}
+
+/** Whether any rating has been given, after which the session's scales are fixed. */
+export function sessionHasRatings(session: RecallSession): boolean {
+  return (
+    session.entries.some((entry) => entry.rows.some((row) => row.likelihood !== null || row.support !== null)) ||
+    session.finalDiagnosis.some((row) => row.likelihood !== null || row.difficulty.trim() !== "")
+  )
 }
 
 function storageKey(encounterId: string): string {
@@ -111,9 +167,11 @@ export function recallAudioKey(encounterId: string): string {
 
 /**
  * The saved session, or an empty one. Version 2 and 3 sessions are migrated
- * in place (see migrateEntry) and overwritten on first save. Sessions from
- * before the per-stop tables (per-utterance cue ratings on a −3..+3 scale)
- * are not carried over: the measure changed, so they start afresh.
+ * in place (see migrateEntry) and overwritten on first save; version 4
+ * sessions, from before the scales could be chosen, were on the numeric
+ * ones. Sessions from before the per-stop tables (per-utterance cue ratings
+ * on a −3..+3 scale) are not carried over: the measure changed, so they
+ * start afresh.
  */
 type StoredRecallSession = Partial<LegacySession> & { version?: number }
 
@@ -149,10 +207,11 @@ function readable(stored: unknown): StoredRecallSession | null {
 
 export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
   const saved = await loadStoredSession(encounterId)
-  if (!saved || (saved.version !== 2 && saved.version !== 3 && saved.version !== 4)) return emptyRecallSession()
+  if (!saved || ![2, 3, 4, 5].includes(saved.version ?? 0)) return emptyRecallSession(rememberedRecallScale())
   const hypotheses = saved.hypotheses ?? []
   return {
-    version: 4,
+    version: 5,
+    scale: saved.scale === "verbal" ? "verbal" : "numeric",
     entries: (saved.entries ?? []).map((entry) => migrateEntry(entry, hypotheses)),
     finalDiagnosis: saved.finalDiagnosis ?? [],
     timeline: saved.timeline,
@@ -302,7 +361,7 @@ export interface RecallPayloadInput {
 
 /**
  * The session as archived and exported: every entry with the turns it is
- * about and its rows as entered.
+ * about and its rows as entered, and the scales the ratings were given on.
  */
 export function buildRecallPayload(input: RecallPayloadInput) {
   const { encounterId, session, turns, exchanges, exchangesDetected, clinicianSpeaker, speakerLabel } = input
@@ -310,11 +369,17 @@ export function buildRecallPayload(input: RecallPayloadInput) {
   const questionTurns = new Set(exchanges.map((exchange) => exchange.question))
   const timeline = session.timeline
   return {
-    schema_version: 4,
+    schema_version: 5,
     encounter_id: encounterId,
     exported_at: new Date().toISOString(),
     clinician_speaker: clinicianSpeaker ?? null,
     exchanges: { source: exchangesDetected ? "model" : "heuristic", ranges: exchanges },
+    // The scales every rating below was given on. A rating is a number on
+    // the numeric scales and the anchor's label on the verbal ones.
+    scales:
+      session.scale === "verbal"
+        ? { kind: "verbal", ...VERBAL_ANCHORS }
+        : { kind: "numeric", likelihood: LIKELIHOOD_RANGE, support: SUPPORT_RANGE, difficulty: "free text" },
     entries: ordered.map((entry, position) => ({
       number: position + 1,
       id: entry.id,

@@ -5,15 +5,21 @@
  * buildRecallPayload in the render package): entries in transcript order with
  * every row as entered. The app stores the session it edits (RecallSession).
  * Exports keep every entry id, so they invert exactly; this turns one back.
- * Schema 4 exports (rows carrying the template's fields) restore to a
- * version 4 session; schema 3 exports (named hypotheses rated per stop, with
- * carried-over likelihoods written out with their source) restore to the
- * version 3 shape, which the app migrates on load. The shapes are restated
- * here, not imported, so the pipeline stays free of the render package.
+ * Schema 5 exports (rows carrying the template's fields, rated on the scales
+ * the export names: numbers on the numeric ones, anchor labels on the
+ * verbal ones) restore to a version 5 session; schema 4 exports (the same
+ * rows, before the scales could be chosen) to version 4; schema 3 exports
+ * (named hypotheses rated per stop, with carried-over likelihoods written
+ * out with their source) to the version 3 shape. The app migrates the older
+ * two on load. The shapes are restated here, not imported, so the pipeline
+ * stays free of the render package.
  */
 
+/** A rating as given: a number on the numeric scales, an anchor's label on the verbal ones. */
+type Rating = number | string
+
 interface RestoredBase {
-  finalDiagnosis: Array<{ id: string; diagnosis: string; likelihood: number | null; why: string; difficulty: string }>
+  finalDiagnosis: Array<{ id: string; diagnosis: string; likelihood: Rating | null; why: string; difficulty: string }>
   timeline?: {
     startedAt: string
     stoppedAt?: string
@@ -23,21 +29,29 @@ interface RestoredBase {
   recallArchivedAt?: string
 }
 
+interface RestoredTemplateEntry {
+  id: string
+  turns: number[]
+  rows: Array<{
+    id: string
+    why: string
+    told: string
+    likelihood: Rating | null
+    support: Rating | null
+    notes: string
+  }>
+  createdAt: string
+}
+
+export interface RestoredRecallSessionV5 extends RestoredBase {
+  version: 5
+  scale: "numeric" | "verbal"
+  entries: RestoredTemplateEntry[]
+}
+
 export interface RestoredRecallSessionV4 extends RestoredBase {
   version: 4
-  entries: Array<{
-    id: string
-    turns: number[]
-    rows: Array<{
-      id: string
-      why: string
-      told: string
-      likelihood: number | null
-      support: number | null
-      notes: string
-    }>
-    createdAt: string
-  }>
+  entries: RestoredTemplateEntry[]
 }
 
 export interface RestoredRecallSessionV3 extends RestoredBase {
@@ -52,7 +66,7 @@ export interface RestoredRecallSessionV3 extends RestoredBase {
   }>
 }
 
-export type RestoredRecallSession = RestoredRecallSessionV4 | RestoredRecallSessionV3
+export type RestoredRecallSession = RestoredRecallSessionV5 | RestoredRecallSessionV4 | RestoredRecallSessionV3
 
 type Json = Record<string, unknown>
 
@@ -72,6 +86,11 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
+function ratingOrNull(value: unknown): Rating | null {
+  if (typeof value === "string") return value.trim() ? value : null
+  return numberOrNull(value)
+}
+
 /** Whether a stored session is in the archived (exported) form rather than the app's own. */
 export function isArchivedRecallPayload(value: unknown): boolean {
   return isObject(value) && typeof value.schema_version === "number" && value.version === undefined
@@ -89,21 +108,23 @@ export function recallSessionFromArchive(raw: unknown): RestoredRecallSession | 
   const payload = raw as Json
   const shared = restoreShared(payload)
 
-  if (payload.schema_version === 4) {
-    const entries: RestoredRecallSessionV4["entries"] = list(payload.entries).map((entry, index) => ({
+  if (payload.schema_version === 4 || payload.schema_version === 5) {
+    const entries: RestoredTemplateEntry[] = list(payload.entries).map((entry, index) => ({
       id: text(entry.id) || `entry-${index + 1}`,
       turns: turnIndexes(entry),
       rows: list(entry.rows).map((row, rowIndex) => ({
         id: text(row.id) || `row-${index + 1}-${rowIndex + 1}`,
         why: text(row.why),
         told: text(row.told),
-        likelihood: numberOrNull(row.likelihood),
-        support: numberOrNull(row.support),
+        likelihood: ratingOrNull(row.likelihood),
+        support: ratingOrNull(row.support),
         notes: text(row.notes),
       })),
       createdAt: text(entry.created_at),
     }))
-    return { version: 4, entries, ...shared }
+    if (payload.schema_version === 4) return { version: 4, entries, ...shared }
+    const scales = isObject(payload.scales) ? payload.scales : null
+    return { version: 5, scale: scales?.kind === "verbal" ? "verbal" : "numeric", entries, ...shared }
   }
 
   const archivedEntries = list(payload.entries)
@@ -148,7 +169,7 @@ function restoreShared(payload: Json): RestoredBase {
   const finalDiagnosis = list(payload.final_diagnosis).map((row, index) => ({
     id: `final-${index + 1}`,
     diagnosis: text(row.diagnosis),
-    likelihood: numberOrNull(row.likelihood),
+    likelihood: ratingOrNull(row.likelihood),
     why: text(row.why),
     difficulty: text(row.difficulty),
   }))

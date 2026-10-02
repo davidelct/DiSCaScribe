@@ -26,6 +26,14 @@ export interface UserPreferences {
    * without it being deliberate, and metadata.json records which was used.
    */
   rawMicrophone?: boolean
+  /**
+   * The rating scales a new stimulated-recall session starts on: numeric
+   * (likelihood 0–10, support −10..+10, difficulty as text) or verbal
+   * anchors. Follows the last choice made in this browser, so a run of
+   * interviews on one set needs choosing once; each session then keeps its
+   * own, and the export records it.
+   */
+  recallScale?: "numeric" | "verbal"
 }
 
 const PREFERENCES_KEY = "openscribe_preferences"
