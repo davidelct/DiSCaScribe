@@ -202,6 +202,14 @@ export interface Encounter {
   archive_location?: string
   /** ISO 8601 timestamp of the last successful archive. */
   archived_at?: string
+  /**
+   * The consultation this one was duplicated from, when it is a copy made to
+   * run the stimulated recall again (on the other rating scales, say). A copy
+   * carries the original's transcript and recording and nothing it was later
+   * given; a copy of a copy points at the original. The recording is served
+   * from the original's archive when this browser holds no copy of it.
+   */
+  duplicated_from?: string
 }
 
 /**

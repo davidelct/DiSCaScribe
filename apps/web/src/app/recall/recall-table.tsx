@@ -29,6 +29,7 @@ import {
   type RegistrationFilter,
 } from "../consultation-search"
 import { TopBar } from "../top-bar"
+import { DuplicateConsultationButton } from "../duplicate-consultation"
 
 interface RecallStage {
   label: string
@@ -136,7 +137,7 @@ function RecallContent() {
                   <th className="px-3 py-3 font-medium">Duration</th>
                   <th className="px-3 py-3 font-medium">Recall</th>
                   <th className="px-3 py-3">
-                    <span className="sr-only">Open recall</span>
+                    <span className="sr-only">Duplicate, open recall</span>
                   </th>
                 </tr>
               </thead>
@@ -179,6 +180,15 @@ function RecallContent() {
                         )}
                       </td>
                       <td className="max-w-xs truncate px-3 py-2.5 text-muted-foreground">
+                        {consultation.duplicated_from && (
+                          <Badge
+                            variant="outline"
+                            title="A copy of another consultation, with the same transcript and recording"
+                            className="mr-2 border-border bg-muted text-[10px] uppercase tracking-wide text-muted-foreground"
+                          >
+                            Copy
+                          </Badge>
+                        )}
                         {consultation.visit_reason || "No reason recorded"}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-foreground">
@@ -190,24 +200,27 @@ function RecallContent() {
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5 text-right">
-                        {stage.action && (
-                          <Button
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              router.push(href)
-                            }}
-                            className={cn(
-                              "h-8 rounded-md px-3",
-                              stage.action === "Start"
-                                ? "bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
-                                : "border border-border bg-card text-foreground shadow-none hover:bg-accent",
-                            )}
-                          >
-                            <Play className="mr-1.5 h-3.5 w-3.5" />
-                            {stage.action}
-                          </Button>
-                        )}
+                        <span className="inline-flex items-center gap-2">
+                          {hasTranscript && <DuplicateConsultationButton encounter={consultation} />}
+                          {stage.action && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                router.push(href)
+                              }}
+                              className={cn(
+                                "h-8 rounded-md px-3",
+                                stage.action === "Start"
+                                  ? "bg-primary text-primary-foreground shadow-soft hover:bg-brand-strong"
+                                  : "border border-border bg-card text-foreground shadow-none hover:bg-accent",
+                              )}
+                            >
+                              <Play className="mr-1.5 h-3.5 w-3.5" />
+                              {stage.action}
+                            </Button>
+                          )}
+                        </span>
                       </td>
                     </tr>
                   )

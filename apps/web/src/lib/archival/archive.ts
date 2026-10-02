@@ -233,6 +233,8 @@ export interface ArchiveNoteInput {
   }
   /** Used only to backfill transcript.txt if phase 1 did not write it. */
   transcriptText: string
+  /** The consultation this one is a copy of, for a duplicate made to run another recall. */
+  duplicatedFrom?: string
 }
 
 export interface ArchiveResult {
@@ -319,6 +321,7 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
     mode: input.mode ?? null,
     recordingDurationSeconds: input.recordingDurationSeconds ?? null,
     capture: { microphoneProcessing: input.capture?.microphoneProcessing ?? null },
+    duplicatedFrom: input.duplicatedFrom ?? null,
     transcription: input.transcription,
     note: input.note
       ? {

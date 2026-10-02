@@ -24,6 +24,8 @@ interface EncounterPayload {
   microphone_processing?: string
   /** "scribed" or "recording_only"; recorded so the archive alone can rebuild the consultation. */
   mode?: string
+  /** The consultation this one was duplicated from, when it is a copy. */
+  duplicated_from?: string
 }
 
 function jsonError(status: number, code: string, message: string) {
@@ -117,6 +119,8 @@ export async function POST(req: NextRequest) {
       language: encounter.language || "en",
       mode: encounter.mode === "recording_only" || encounter.mode === "scribed" ? encounter.mode : undefined,
       recordingDurationSeconds: encounter.recording_duration,
+      duplicatedFrom:
+        typeof encounter.duplicated_from === "string" && encounter.duplicated_from ? encounter.duplicated_from : undefined,
       capture: {
         microphoneProcessing:
           encounter.microphone_processing === "raw" || encounter.microphone_processing === "browser"

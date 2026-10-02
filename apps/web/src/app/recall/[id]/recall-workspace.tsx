@@ -20,6 +20,7 @@ import { getPatient, isLinkedToPatient, loadByokApiKeys } from "@storage"
 import type { Encounter } from "@storage/types"
 import { detectRecallExchanges } from "@/app/actions"
 import { TopBar } from "../../top-bar"
+import { DuplicateConsultationButton } from "../../duplicate-consultation"
 
 function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
   const { encounters, loaded: encountersLoaded, updateEncounter } = useEncounters()
@@ -97,6 +98,14 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
               {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
             </h2>
             <span className="text-xs font-medium text-muted-foreground">Stimulated recall</span>
+            {encounter.duplicated_from && (
+              <span
+                title="A copy of another consultation, with the same transcript and recording"
+                className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                Copy
+              </span>
+            )}
             <div className="ml-auto flex min-w-0 items-center gap-x-2 text-xs text-muted-foreground">
               <span className="whitespace-nowrap">{format(new Date(encounter.created_at), "d MMM yyyy, HH:mm")}</span>
               {encounter.visit_reason && (
@@ -104,6 +113,9 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
                   <span className="text-border">·</span>
                   <span className="truncate">{encounter.visit_reason}</span>
                 </>
+              )}
+              {encounter.transcript_text?.trim() && (
+                <DuplicateConsultationButton encounter={encounter} label className="ml-2" />
               )}
             </div>
           </div>

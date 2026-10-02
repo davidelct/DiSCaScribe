@@ -14,7 +14,9 @@ const PASSED_HEADERS = ["content-type", "content-length", "content-range", "acce
  * Stream a consultation's recording (or, with `?kind=recall`, its recall
  * interview) from the Box archive. Browsers keep their own recordings in
  * IndexedDB; this is how every other browser plays them. A Range header is
- * passed through so the player can seek.
+ * passed through so the player can seek. A duplicated consultation shares
+ * its original's recording: with none of its own in the archive, the
+ * original's is streamed (its recall interview is its own).
  */
 export async function GET(req: NextRequest, context: Context) {
   const resolved = await resolveScope(req)
@@ -27,15 +29,28 @@ export async function GET(req: NextRequest, context: Context) {
 
   try {
     const encounter = await getConsultation(resolved.scope, id)
-    let folderId = encounter?.archive_location
-    if (!folderId) {
-      const containers = await archival.client.listContainers()
-      folderId = containers.find((container) => encounterIdOfContainer(container.name) === id)?.id
+    const owners = [{ id, archiveLocation: encounter?.archive_location }]
+    if (prefix === "audio." && encounter?.duplicated_from && encounter.duplicated_from !== id) {
+      const original = await getConsultation(resolved.scope, encounter.duplicated_from)
+      owners.push({ id: encounter.duplicated_from, archiveLocation: original?.archive_location })
     }
-    if (!folderId) return jsonError(404, "not_archived", "This consultation has no archive folder")
 
-    const files = await archival.client.listFiles(folderId)
-    const audio = [...files.values()].find((file) => file.name.startsWith(prefix))
+    let containers: Awaited<ReturnType<typeof archival.client.listContainers>> | null = null
+    let folders = 0
+    let audio: { id: string; name: string } | undefined
+    for (const owner of owners) {
+      let folderId = owner.archiveLocation
+      if (!folderId) {
+        containers ??= await archival.client.listContainers()
+        folderId = containers.find((container) => encounterIdOfContainer(container.name) === owner.id)?.id
+      }
+      if (!folderId) continue
+      folders += 1
+      const files = await archival.client.listFiles(folderId)
+      audio = [...files.values()].find((file) => file.name.startsWith(prefix))
+      if (audio) break
+    }
+    if (folders === 0) return jsonError(404, "not_archived", "This consultation has no archive folder")
     if (!audio) return jsonError(404, "no_audio", "No recording in the archive for this consultation")
 
     const upstream = await archival.client.downloadFile(audio.id, req.headers.get("range") ?? undefined)

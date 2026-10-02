@@ -40,6 +40,7 @@ interface ArchivedMetadata {
   mode?: string
   recordingDurationSeconds?: number | null
   capture?: { microphoneProcessing?: string | null }
+  duplicatedFrom?: string | null
   note?: { version?: number; source?: string | null; approved?: boolean } | null
 }
 
@@ -132,6 +133,7 @@ export function encounterFromArchive(archived: ArchivedConsultation): Encounter 
       ? { recording_duration: meta.recordingDurationSeconds }
       : {}),
     ...(microphone === "browser" || microphone === "raw" ? { microphone_processing: microphone } : {}),
+    ...(meta.duplicatedFrom ? { duplicated_from: meta.duplicatedFrom } : {}),
     archive_status: "archived",
     archive_location: archived.folderId,
     archived_at: archivedAt,
