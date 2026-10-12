@@ -1,8 +1,18 @@
 import {
+  CURRENT_ANCHOR_SET,
+  RECALL_TEMPLATE,
+  VERBAL_ANCHOR_SETS,
+  isAnchorSet,
   isArchivedRecallPayload,
+  isTemplateRowV6,
+  joinText,
   parseDiarizedTranscript,
   recallSessionFromArchive,
-  type RecallExchangeRange,
+  templateEntryV6From,
+  type AnchorSet,
+  type Rating,
+  type TemplateRowV5,
+  type TemplateRowV6,
   type TranscriptTurn,
 } from "@pipeline-errors"
 import { loadSecureItem, saveSecureItem } from "@storage/secure-storage"
@@ -15,75 +25,53 @@ import {
   RECALL_STORAGE_PREFIX,
 } from "@storage/shared-store"
 
+export type { AnchorSet, Rating }
+
 /**
  * Stimulated recall (WT3.1) session data.
  *
- * The clinician goes back over the transcript with an interviewer and stops
- * at turns of their choosing. Each stop is an entry holding the study's
- * template: a table with one row per thought, where a row answers "why did
- * you ask this question / these questions? did you have specific hypotheses
- * in mind?", "what did the answer(s) tell you? did it/they suggest specific
- * hypotheses?", rates the hypothesis's likelihood and the answer's
- * information support, and takes notes. A vague takeaway is a row with the
- * text and no ratings; the ratings come once a hypothesis has formed, which
- * may be a later row at a later stop. The ratings are given on one of two
- * scale sets, chosen per session (see RatingScale). Sessions are persisted
- * per encounter in the shared store when the server has one (so the recall
- * can be reviewed from any laptop), with the encrypted local store as a
- * mirror.
+ * The clinician goes back over the transcript with an interviewer,
+ * highlighting the information (what the patient said, an examination or
+ * investigation result) that was important for their thinking at the
+ * time. A highlight is any set of turns ticked in the transcript; it is an
+ * entry holding the template's three questions: the hypothesis (or
+ * hypotheses) the information was important to, one row each, and for
+ * every hypothesis how much the information supported it and how likely it
+ * became at that stage, plus notes for the stop. The ratings are given on
+ * one of two scale sets, chosen per session (see RatingScale). Sessions
+ * are persisted per encounter in the shared store when the server has one
+ * (so the recall can be reviewed from any laptop), with the encrypted
+ * local store as a mirror.
  */
 
 /**
  * The rating scales a session uses, being trialled side by side. Numeric:
  * likelihood 0–10, information support −10..+10, the case's difficulty as
- * free text. Verbal: Olga Kostopoulou's anchors (September 2026), four for
- * likelihood and difficulty, five for support. The choice is made before
- * any rating is given and then fixed for the session, so a session is
- * wholly on one set; the export records which.
+ * free text. Verbal: the anchors of the session's anchor set (see
+ * AnchorSet in the shared package; SR_TemplateV6's for new sessions). The
+ * choice is made before any rating is given and then fixed for the
+ * session, so a session is wholly on one set; the export records which.
  */
 export type RatingScale = "numeric" | "verbal"
-
-/** A rating as given: a number on the numeric scales, the anchor's label on the verbal ones. */
-export type Rating = number | string
 
 export const LIKELIHOOD_RANGE = { min: 0, max: 10 } as const
 export const SUPPORT_RANGE = { min: -10, max: 10 } as const
 
-/** The verbal anchors, each scale's in ascending order. Stored and exported as written here. */
-export const VERBAL_ANCHORS: Record<"likelihood" | "support" | "difficulty", readonly string[]> = {
-  likelihood: ["Unlikely", "Somewhat unlikely", "Somewhat likely", "Very likely"],
-  support: ["Rejects", "Reduces the chance", "No change", "Increases the chance", "Confirms"],
-  difficulty: ["Very straightforward", "Somewhat straightforward", "Moderately difficult", "Very difficult"],
-}
-
-/** Which way a support rating points: against the hypothesis (−1), neither (0), or for it (1). */
-export function supportDirection(value: Rating): -1 | 0 | 1 {
-  if (typeof value === "number") return value > 0 ? 1 : value < 0 ? -1 : 0
-  const index = VERBAL_ANCHORS.support.indexOf(value)
-  if (index < 0) return 0
-  const middle = (VERBAL_ANCHORS.support.length - 1) / 2
-  return index > middle ? 1 : index < middle ? -1 : 0
-}
-
-/** One row of a stop's table. */
-export interface RecallRow {
-  id: string
-  /** "Why did you ask this question / these questions? Did you have specific hypotheses in mind?" */
-  why: string
-  /** "What did the answer(s) tell you? Did it/they suggest specific hypotheses?" */
-  told: string
-  /** On the session's likelihood scale; null until a hypothesis has formed enough to rate. */
-  likelihood: Rating | null
-  /** On the session's support scale; null until rated. */
-  support: Rating | null
-  notes: string
-}
+/**
+ * One row of a stop: a "Hypothesis N" box with its two ratings. A row
+ * carried over from a session on the earlier template keeps its answers to
+ * that template's two questions under `legacy`.
+ */
+export type RecallRow = TemplateRowV6
 
 export interface RecallEntry {
   id: string
   /** Transcript turns the entry is about, ascending. */
   turns: number[]
+  /** One per hypothesis named at this stop, in the order named. */
   rows: RecallRow[]
+  /** Notes for the stop as a whole. */
+  notes: string
   createdAt: string
 }
 
@@ -120,9 +108,17 @@ export interface RecallTimeline {
 }
 
 export interface RecallSession {
-  version: 5
+  version: 6
   /** The scales every rating in the session is given on. */
   scale: RatingScale
+  /**
+   * The verbal anchors the session's verbal ratings are on. Fixed with the
+   * scale once a rating is given; a session begun on an earlier set stays
+   * on it. Unused on the numeric scales.
+   */
+  anchors: AnchorSet
+  /** The version the session was begun on, when earlier than this one. */
+  migratedFrom?: 2 | 3 | 4 | 5
   entries: RecallEntry[]
   finalDiagnosis: FinalDiagnosisRow[]
   /** Timing of the recall recording (replaced on re-record). */
@@ -131,17 +127,33 @@ export interface RecallSession {
   recallArchivedAt?: string
 }
 
-export function emptyRecallSession(scale: RatingScale = "numeric"): RecallSession {
-  return { version: 5, scale, entries: [], finalDiagnosis: [] }
+export function emptyRecallSession(scale: RatingScale = "verbal"): RecallSession {
+  return { version: 6, scale, anchors: CURRENT_ANCHOR_SET, entries: [], finalDiagnosis: [] }
+}
+
+/** The anchors a session's verbal ratings are given on. */
+export function sessionAnchors(session: Pick<RecallSession, "anchors">) {
+  return VERBAL_ANCHOR_SETS[session.anchors]
+}
+
+/**
+ * The session after an edit, its anchor set kept honest: an earlier set is
+ * held only while ratings on it remain, so once the last one is removed
+ * (which also unlocks the scales) the session moves to the current set.
+ */
+export function sessionAnchorsAfterEdit(session: RecallSession): RecallSession {
+  if (session.anchors === CURRENT_ANCHOR_SET || sessionHasRatings(session)) return session
+  return { ...session, anchors: CURRENT_ANCHOR_SET }
 }
 
 /**
  * The scales a new session starts on: those last chosen in this browser,
- * numeric until a choice is made. A run of interviews on one set then needs
- * the choice once; each session keeps its own afterwards.
+ * verbal until a choice is made (the template in the interviewer's hand
+ * draws the verbal scales). A run of interviews on one set then needs the
+ * choice once; each session keeps its own afterwards.
  */
 export function rememberedRecallScale(): RatingScale {
-  return getPreferences().recallScale === "verbal" ? "verbal" : "numeric"
+  return getPreferences().recallScale === "numeric" ? "numeric" : "verbal"
 }
 
 export function rememberRecallScale(scale: RatingScale): void {
@@ -149,7 +161,7 @@ export function rememberRecallScale(scale: RatingScale): void {
 }
 
 /** Whether any rating has been given, after which the session's scales are fixed. */
-export function sessionHasRatings(session: RecallSession): boolean {
+export function sessionHasRatings(session: Pick<RecallSession, "entries" | "finalDiagnosis">): boolean {
   return (
     session.entries.some((entry) => entry.rows.some((row) => row.likelihood !== null || row.support !== null)) ||
     session.finalDiagnosis.some((row) => row.likelihood !== null || row.difficulty.trim() !== "")
@@ -166,12 +178,13 @@ export function recallAudioKey(encounterId: string): string {
 }
 
 /**
- * The saved session, or an empty one. Version 2 and 3 sessions are migrated
- * in place (see migrateEntry) and overwritten on first save; version 4
- * sessions, from before the scales could be chosen, were on the numeric
- * ones. Sessions from before the per-stop tables (per-utterance cue ratings
- * on a −3..+3 scale) are not carried over: the measure changed, so they
- * start afresh.
+ * The saved session, or an empty one. Versions 2 to 5 are migrated in place
+ * (see migrateEntry and templateRowV6From) and overwritten on first save.
+ * Version 4 sessions, from before the scales could be chosen, were on the
+ * numeric ones; version 5 verbal sessions were on the September anchors.
+ * Sessions from before the per-stop tables (per-utterance cue ratings on a
+ * −3..+3 scale) are not carried over: the measure changed, so they start
+ * afresh.
  */
 type StoredRecallSession = Partial<LegacySession> & { version?: number }
 
@@ -205,37 +218,53 @@ function readable(stored: unknown): StoredRecallSession | null {
   return (recallSessionFromArchive(stored) as StoredRecallSession | null) ?? (stored as StoredRecallSession)
 }
 
+const KNOWN_VERSIONS = [2, 3, 4, 5, 6] as const
+
 export async function loadRecallSession(encounterId: string): Promise<RecallSession> {
   const saved = await loadStoredSession(encounterId)
-  if (!saved || ![2, 3, 4, 5].includes(saved.version ?? 0)) return emptyRecallSession(rememberedRecallScale())
+  const version = saved?.version ?? 0
+  if (!saved || !(KNOWN_VERSIONS as readonly number[]).includes(version)) {
+    return emptyRecallSession(rememberedRecallScale())
+  }
   const hypotheses = saved.hypotheses ?? []
+  const entries = (saved.entries ?? []).map((entry) => migrateEntry(entry, hypotheses))
+  const finalDiagnosis = saved.finalDiagnosis ?? []
+  const scale: RatingScale = saved.scale === "verbal" ? "verbal" : "numeric"
+  // A verbal session rated before the anchors were named was on the
+  // September set. An earlier set is kept only while the session holds
+  // ratings on it (see sessionAnchorsAfterEdit); otherwise the current.
+  const hasRatings = sessionHasRatings({ entries, finalDiagnosis })
+  const anchors: AnchorSet =
+    isAnchorSet(saved.anchors) && (saved.anchors === CURRENT_ANCHOR_SET || hasRatings)
+      ? saved.anchors
+      : scale === "verbal" && hasRatings
+        ? "2026-09"
+        : CURRENT_ANCHOR_SET
+  const migratedFrom = version < 6 ? (version as 2 | 3 | 4 | 5) : saved.migratedFrom
   return {
-    version: 5,
-    scale: saved.scale === "verbal" ? "verbal" : "numeric",
-    entries: (saved.entries ?? []).map((entry) => migrateEntry(entry, hypotheses)),
-    finalDiagnosis: saved.finalDiagnosis ?? [],
+    version: 6,
+    scale,
+    anchors,
+    ...(migratedFrom ? { migratedFrom } : {}),
+    entries,
+    finalDiagnosis,
     timeline: saved.timeline,
     recallArchivedAt: saved.recallArchivedAt,
   }
-}
-
-/** Non-empty pieces of free text as one block, in the order given. */
-function joinText(...parts: (string | undefined)[]): string {
-  return parts
-    .map((part) => part?.trim() ?? "")
-    .filter(Boolean)
-    .join("\n")
 }
 
 /**
  * Sessions from earlier cuts of this view. Versions 2 and 3 kept a list of
  * named hypotheses shared across stops, and each stop rated every hypothesis
  * on its table (with a free-text reason beside it; the first cut had one
- * "why" and "thinking" per stop). The template now asks its questions per
- * row, so every rating becomes a row: its reason becomes the row's "why",
- * prefixed with the hypothesis it was written against, and the numbers
- * carry over as they were reported at that stop. Notes kept per stop go to
- * the stop's first row. Nothing typed is lost.
+ * "why" and "thinking" per stop), with notes per stop. Versions 4 and 5
+ * asked the template's two questions per row ("why did you ask", "what did
+ * the answer tell you"), with notes per row. Every rating from 2 and 3
+ * becomes such a row: its reason becomes the row's "why", prefixed with the
+ * hypothesis it was written against, and the numbers carry over as they
+ * were reported at that stop. Those rows then become V6 rows with the two
+ * answers kept under `legacy`, and the notes, per stop or per row, gather
+ * into the stop's notes (templateEntryV6From). Nothing typed is lost.
  */
 interface LegacyRating {
   reason?: string
@@ -252,19 +281,22 @@ interface LegacyEntry {
   turns: number[]
   notes?: string
   createdAt: string
-  rows?: Array<Omit<RecallRow, "notes"> & { notes?: string }>
+  rows?: Array<(Omit<TemplateRowV5, "notes"> & { notes?: string }) | TemplateRowV6>
   ratings?: Record<string, LegacyRating>
   why?: string
   thinking?: string
 }
-interface LegacySession extends Omit<RecallSession, "version" | "entries"> {
+interface LegacySession extends Omit<RecallSession, "version" | "entries" | "anchors"> {
+  anchors?: unknown
   hypotheses?: LegacyHypothesis[]
   entries?: LegacyEntry[]
 }
 
 function migrateEntry(raw: LegacyEntry, hypotheses: LegacyHypothesis[]): RecallEntry {
   const { why, thinking, ratings, rows, notes, ...entry } = raw
-  const migrated: RecallRow[] = rows ? rows.map((row) => ({ ...row, notes: row.notes ?? "" })) : []
+  const migrated: Array<TemplateRowV5 | TemplateRowV6> = rows
+    ? rows.map((row) => (isTemplateRowV6(row) ? row : { ...row, notes: row.notes ?? "" }))
+    : []
   if (!rows) {
     const nameOf = (id: string) => hypotheses.find((hypothesis) => hypothesis.id === id)?.name
     for (const [id, rating] of Object.entries(ratings ?? {})) {
@@ -281,15 +313,13 @@ function migrateEntry(raw: LegacyEntry, hypotheses: LegacyHypothesis[]): RecallE
     }
     const stopLevel = joinText(why, thinking)
     if (stopLevel) {
-      if (migrated[0]) migrated[0] = { ...migrated[0], why: joinText(stopLevel, migrated[0].why) }
+      const first = migrated[0]
+      if (first && !isTemplateRowV6(first)) migrated[0] = { ...first, why: joinText(stopLevel, first.why) }
       else migrated.push({ id: crypto.randomUUID(), why: stopLevel, told: "", likelihood: null, support: null, notes: "" })
     }
   }
-  if (notes?.trim()) {
-    if (migrated[0]) migrated[0] = { ...migrated[0], notes: joinText(migrated[0].notes, notes) }
-    else migrated.push({ id: crypto.randomUUID(), why: "", told: "", likelihood: null, support: null, notes: notes.trim() })
-  }
-  return { ...entry, rows: migrated }
+  const converted = templateEntryV6From(migrated, notes)
+  return { ...entry, rows: converted.rows, notes: converted.notes }
 }
 
 export async function saveRecallSession(encounterId: string, session: RecallSession): Promise<void> {
@@ -352,33 +382,40 @@ export interface RecallPayloadInput {
   encounterId: string
   session: RecallSession
   turns: TranscriptTurn[]
-  exchanges: RecallExchangeRange[]
-  /** Whether the exchanges came from the model (true) or the question-mark heuristic (false). */
-  exchangesDetected: boolean
   clinicianSpeaker?: number
   speakerLabel: (speaker: number) => string
 }
 
 /**
  * The session as archived and exported: every entry with the turns it is
- * about and its rows as entered, and the scales the ratings were given on.
+ * about and its rows as entered; the template's questions and the scales
+ * the ratings were given on, so the dataset names what each value answers.
  */
 export function buildRecallPayload(input: RecallPayloadInput) {
-  const { encounterId, session, turns, exchanges, exchangesDetected, clinicianSpeaker, speakerLabel } = input
+  const { encounterId, session, turns, clinicianSpeaker, speakerLabel } = input
   const ordered = orderedEntries(session)
-  const questionTurns = new Set(exchanges.map((exchange) => exchange.question))
   const timeline = session.timeline
   return {
-    schema_version: 5,
+    schema_version: 6,
     encounter_id: encounterId,
     exported_at: new Date().toISOString(),
+    template: {
+      name: RECALL_TEMPLATE.name,
+      questions: {
+        hypothesis: RECALL_TEMPLATE.hypothesis,
+        support: RECALL_TEMPLATE.support,
+        likelihood: RECALL_TEMPLATE.likelihood,
+        notes: RECALL_TEMPLATE.notes,
+        legacy_v5: RECALL_TEMPLATE.legacyV5,
+      },
+    },
+    migrated_from: session.migratedFrom ?? null,
     clinician_speaker: clinicianSpeaker ?? null,
-    exchanges: { source: exchangesDetected ? "model" : "heuristic", ranges: exchanges },
     // The scales every rating below was given on. A rating is a number on
     // the numeric scales and the anchor's label on the verbal ones.
     scales:
       session.scale === "verbal"
-        ? { kind: "verbal", ...VERBAL_ANCHORS }
+        ? { kind: "verbal", anchor_set: session.anchors, ...sessionAnchors(session) }
         : { kind: "numeric", likelihood: LIKELIHOOD_RANGE, support: SUPPORT_RANGE, difficulty: "free text" },
     entries: ordered.map((entry, position) => ({
       number: position + 1,
@@ -389,15 +426,15 @@ export function buildRecallPayload(input: RecallPayloadInput) {
         speaker_label: turns[index] ? speakerLabel(turns[index].speaker) : null,
         text: turns[index]?.text ?? "",
       })),
-      is_question: questionTurns.has(entry.turns[0]),
-      // The template's table: one row per thought, its fields as entered.
+      // One row per hypothesis, its fields as entered; "Hypothesis N" is the row's position.
       rows: entry.rows.map((row) => ({
-        why: row.why,
-        told: row.told,
-        likelihood: row.likelihood,
+        id: row.id,
+        hypothesis: row.hypothesis,
         support: row.support,
-        notes: row.notes,
+        likelihood: row.likelihood,
+        legacy: row.legacy ?? null,
       })),
+      notes: entry.notes,
       created_at: entry.createdAt,
     })),
     final_diagnosis: session.finalDiagnosis.map((row) => ({

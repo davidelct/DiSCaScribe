@@ -1,38 +1,42 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useId, useState, type FormEvent } from "react"
 import { X } from "lucide-react"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
 import {
+  RECALL_TEMPLATE,
+  VERBAL_ANCHOR_SETS,
+  hypothesisLetter,
+  hypothesisQuestion,
+  supportDirection,
+  type AnchorSet,
+  type Rating,
+} from "@pipeline-errors"
+import {
   LIKELIHOOD_RANGE,
   SUPPORT_RANGE,
-  VERBAL_ANCHORS,
-  supportDirection,
   type FinalDiagnosisRow,
-  type Rating,
   type RatingScale,
   type RecallEntry,
   type RecallRow,
 } from "./recall-session"
 
 /**
- * One stop of the recall interview as a card: the turns it is about, the
- * rows so far, and a form below them that adds a row (clicking a row loads
- * it into the form to change it).
- *
- * A row is what the template asks at a question: why it was asked and
- * whether hypotheses were in mind, what the answer told the clinician, how
- * likely the hypothesis seemed, how much the answer supported it, and notes.
- * Two of those are paragraphs, so a row is laid out the way the template
- * reads — question, answer, the ratings, notes — not as a five-column table.
- * A vague takeaway is a row with text and no ratings. The ratings are given
- * on the session's scales: a number box on the numeric ones, a row of
- * anchors to pick from on the verbal ones.
+ * One highlight of the recall interview as a card: the turns it is about
+ * and the template's three questions, answered in place. Question 1 names
+ * the hypotheses, one box each, with a fresh box appearing once the last
+ * is filled; questions 2 and 3 are then asked once per named hypothesis
+ * (2a, 2b…), on the session's scales: a number box on the numeric ones, a
+ * row of the session's anchors on the verbal ones. Notes close the stop.
+ * Every change saves as it is made. Closed, the card reads back what was
+ * answered. A row carried over from the earlier template shows the answers
+ * it gave then, read-only, under that template's questions.
  */
 
 const CARD = "rounded-2xl border bg-card shadow-soft"
 const LABEL = "text-xs text-muted-foreground"
+const QUESTION = "text-[13px] font-medium leading-[18px] text-foreground"
 const BOX =
   "w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-[13px] leading-[18px] text-foreground " +
   "placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
@@ -41,8 +45,6 @@ const NUMBER_BOX =
 // The final-diagnosis table below still reads as a table.
 const TH = "pb-1.5 pr-3 text-left align-bottom text-xs font-medium text-muted-foreground"
 const TD = "py-1.5 pr-3 align-top text-[13px] leading-[18px] text-foreground"
-export const WHY_QUESTION = "Why did you ask this question / these questions? Did you have specific hypotheses in mind?"
-export const TOLD_QUESTION = "What did the answer(s) tell you? Did it/they suggest specific hypotheses?"
 
 /** A rating as shown: a label as given, a number as is, or signed on the support scale. */
 function formatRating(value: Rating, signed = false): string {
@@ -81,34 +83,37 @@ function Field({ label, className, children }: { label: string; className?: stri
 /**
  * A verbal scale as a row of its anchors, the chosen one filled. Choosing it
  * again clears the rating, as emptying the number box does on the numeric
- * scales. A rating given under earlier wording of the anchors is shown as
- * given, so saving the row keeps it.
+ * scales. A rating given under other wording of the anchors is shown as
+ * given, so it is kept until changed.
  */
 function AnchorPicker({
   label,
+  labelClassName,
   anchors,
   value,
   onChange,
 }: {
   label: string
+  labelClassName?: string
   anchors: readonly string[]
-  value: string
-  onChange: (value: string) => void
+  value: Rating | null
+  onChange: (value: Rating | null) => void
 }) {
-  const options = value && !anchors.includes(value) ? [...anchors, value] : anchors
+  const current = typeof value === "string" ? value : value === null ? "" : String(value)
+  const options = current && !anchors.includes(current) ? [...anchors, current] : anchors
   return (
     <div className="flex flex-col gap-1">
-      <span className={LABEL}>{label}</span>
+      <span className={labelClassName ?? LABEL}>{label}</span>
       <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1">
         {options.map((anchor) => {
-          const checked = anchor === value
+          const checked = anchor === current
           return (
             <button
               key={anchor}
               type="button"
               role="radio"
               aria-checked={checked}
-              onClick={() => onChange(checked ? "" : anchor)}
+              onClick={() => onChange(checked ? null : anchor)}
               className={cn(
                 "rounded-md border px-2 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25",
                 checked
@@ -125,9 +130,61 @@ function AnchorPicker({
   )
 }
 
-/** The form's control for one rating: a number box on the numeric scales, the anchors on the verbal ones. */
+/**
+ * A number box for one of the numeric scales. What is typed stays in the
+ * box while it is typed (a minus sign on its own, say); the rating behind
+ * it is the number once there is one, clamped to the range, and null when
+ * the box is emptied.
+ */
+function NumberRating({
+  label,
+  labelClassName,
+  range,
+  value,
+  onChange,
+}: {
+  label: string
+  labelClassName?: string
+  range: { min: number; max: number }
+  value: Rating | null
+  onChange: (value: Rating | null) => void
+}) {
+  const shown = value === null ? "" : String(value)
+  const [draft, setDraft] = useState(shown)
+  const [editing, setEditing] = useState(false)
+  useEffect(() => {
+    if (!editing) setDraft(shown)
+  }, [editing, shown])
+  return (
+    <label className="flex flex-col gap-1">
+      <span className={labelClassName ?? LABEL}>
+        {label} <span className="text-muted-foreground">{formatRange(range)}</span>
+      </span>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={range.min}
+        max={range.max}
+        step={1}
+        value={draft}
+        onFocus={() => setEditing(true)}
+        onBlur={() => setEditing(false)}
+        onChange={(event) => {
+          const raw = event.target.value
+          setDraft(raw)
+          if (raw.trim() === "") onChange(null)
+          else if (Number.isFinite(Number(raw))) onChange(parseScale(raw, range.min, range.max))
+        }}
+        className={NUMBER_BOX}
+      />
+    </label>
+  )
+}
+
+/** One rating on the session's scales: a number box on the numeric ones, the anchors on the verbal ones. */
 function RatingField({
   label,
+  labelClassName,
   scale,
   range,
   anchors,
@@ -135,36 +192,18 @@ function RatingField({
   onChange,
 }: {
   label: string
+  labelClassName?: string
   scale: RatingScale
   range: { min: number; max: number }
   anchors: readonly string[]
-  value: string
-  onChange: (value: string) => void
+  value: Rating | null
+  onChange: (value: Rating | null) => void
 }) {
-  if (scale === "verbal") return <AnchorPicker label={label} anchors={anchors} value={value} onChange={onChange} />
-  return (
-    <Field label={`${label} ${formatRange(range)}`}>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={range.min}
-        max={range.max}
-        step={1}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={NUMBER_BOX}
-      />
-    </Field>
-  )
+  if (scale === "verbal") return <AnchorPicker label={label} labelClassName={labelClassName} anchors={anchors} value={value} onChange={onChange} />
+  return <NumberRating label={label} labelClassName={labelClassName} range={range} value={value} onChange={onChange} />
 }
 
-/** What the form's rating box holds, as a rating on the session's scales: empty is null. */
-function readRating(raw: string, scale: RatingScale, range: { min: number; max: number }): Rating | null {
-  if (scale === "numeric") return parseScale(raw, range.min, range.max)
-  return raw || null
-}
-
-/** One of the template's questions with its answer; nothing when unanswered. */
+/** One of the earlier template's questions with its answer; nothing when unanswered. */
 function Answer({ question, text }: { question: string; text: string }) {
   if (!text) return null
   return (
@@ -175,8 +214,8 @@ function Answer({ question, text }: { question: string; text: string }) {
   )
 }
 
-/** The row's two ratings as chips, or a note that they are still to come. */
-function Ratings({ likelihood, support }: { likelihood: Rating | null; support: Rating | null }) {
+/** A row's two ratings as chips, in the template's order, or a note that they are still to come. */
+function Ratings({ support, likelihood }: { support: Rating | null; likelihood: Rating | null }) {
   if (likelihood === null && support === null) {
     return <span className="text-[11px] text-muted-foreground">Not rated yet</span>
   }
@@ -184,17 +223,17 @@ function Ratings({ likelihood, support }: { likelihood: Rating | null; support: 
   return (
     <>
       <span className={chip}>
-        <span className="text-muted-foreground">Likelihood</span>
-        <span className={cn("font-semibold text-foreground", typeof likelihood === "number" && "font-mono")}>
-          {likelihood !== null ? formatRating(likelihood) : "–"}
-        </span>
-      </span>
-      <span className={chip}>
         <span className="text-muted-foreground">Support</span>
         <span
           className={cn("font-semibold", typeof support === "number" && "font-mono", support !== null ? supportClass(support) : "text-foreground")}
         >
           {support !== null ? formatRating(support, true) : "–"}
+        </span>
+      </span>
+      <span className={chip}>
+        <span className="text-muted-foreground">Likelihood</span>
+        <span className={cn("font-semibold text-foreground", typeof likelihood === "number" && "font-mono")}>
+          {likelihood !== null ? formatRating(likelihood) : "–"}
         </span>
       </span>
     </>
@@ -206,13 +245,9 @@ export interface EntryExcerptLine {
   text: string
 }
 
-/** What the form submits: the template's fields. */
-export interface EntryRowInput {
-  why: string
-  told: string
-  likelihood: Rating | null
-  support: Rating | null
-  notes: string
+/** Whether a row has anything to ask the rating questions about: a name, a rating already, or carried-over answers. */
+function rowIsNamed(row: RecallRow): boolean {
+  return Boolean(row.hypothesis.trim() || row.legacy || row.support !== null || row.likelihood !== null)
 }
 
 interface RecallEntryCardProps {
@@ -220,73 +255,69 @@ interface RecallEntryCardProps {
   entry: RecallEntry
   /** The scales the session's ratings are given on. */
   scale: RatingScale
+  /** The verbal anchors the session is on. */
+  anchors: AnchorSet
+  /** Hypotheses already named in this session, offered as a box is typed in so one is spelt the same at every stop. */
+  hypothesisSuggestions: string[]
   excerpt: EntryExcerptLine[]
   /** The entry whose turns are ticked in the transcript. */
   open: boolean
   onOpen: () => void
-  onAddRow: (row: EntryRowInput) => void
-  onSaveRow: (rowId: string, row: EntryRowInput) => void
-  onRemoveRow: (rowId: string) => void
+  onChangeRows: (rows: RecallRow[]) => void
+  onChangeNotes: (notes: string) => void
   onRemove: () => void
   cardRef: (element: HTMLElement | null) => void
 }
-
-const EMPTY_FORM = { why: "", told: "", likelihood: "", support: "", notes: "" }
 
 export function RecallEntryCard({
   number,
   entry,
   scale,
+  anchors,
+  hypothesisSuggestions,
   excerpt,
   open,
   onOpen,
-  onAddRow,
-  onSaveRow,
-  onRemoveRow,
+  onChangeRows,
+  onChangeNotes,
   onRemove,
   cardRef,
 }: RecallEntryCardProps) {
   // Removal asks once, inline: a browser confirm() is blocked in some
   // embedded views and would leave the X doing nothing.
   const [confirmingRemove, setConfirmingRemove] = useState(false)
-  const [form, setForm] = useState(EMPTY_FORM)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  // The id the next row will get, settled before it exists: the empty box
+  // is keyed by it, so when typing turns the box into a row the input the
+  // clinician is typing in stays the same element and keeps the focus.
+  const [nextId, setNextId] = useState(() => crypto.randomUUID())
+  const suggestionsId = useId()
+  const verbal = VERBAL_ANCHOR_SETS[anchors]
   useEffect(() => {
     if (!open) setConfirmingRemove(false)
   }, [open])
 
-  const editRow = (row: RecallRow) => {
-    setEditingId(row.id)
-    setForm({
-      why: row.why,
-      told: row.told,
-      likelihood: row.likelihood !== null ? String(row.likelihood) : "",
-      support: row.support !== null ? String(row.support) : "",
-      notes: row.notes,
-    })
-  }
+  const rows = entry.rows
+  // Question 1's boxes: every row, plus an empty one once the last is filled.
+  const slots: Array<RecallRow | null> = rows.length === 0 || rowIsNamed(rows[rows.length - 1]) ? [...rows, null] : rows
+  const named = rows.map((row, index) => ({ row, number: index + 1 })).filter(({ row }) => rowIsNamed(row))
+  const suggestions = hypothesisSuggestions.filter((name) => !rows.some((row) => row.hypothesis === name))
 
-  const resetForm = () => {
-    setEditingId(null)
-    setForm(EMPTY_FORM)
-  }
-
-  const canSubmit = Boolean(form.why.trim() || form.told.trim() || form.notes.trim())
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (!canSubmit) return
-    const row: EntryRowInput = {
-      why: form.why.trim(),
-      told: form.told.trim(),
-      likelihood: readRating(form.likelihood, scale, LIKELIHOOD_RANGE),
-      support: readRating(form.support, scale, SUPPORT_RANGE),
-      notes: form.notes.trim(),
+  const setHypothesis = (index: number, hypothesis: string) => {
+    if (index >= rows.length) {
+      if (!hypothesis) return
+      onChangeRows([...rows, { id: nextId, hypothesis, support: null, likelihood: null }])
+      setNextId(crypto.randomUUID())
+      return
     }
-    if (editingId) onSaveRow(editingId, row)
-    else onAddRow(row)
-    resetForm()
+    const next = rows.map((row, i) => (i === index ? { ...row, hypothesis } : row))
+    // The last box emptied again, with nothing rated: it goes, so the stop does not keep a blank hypothesis.
+    const last = next[next.length - 1]
+    if (index === next.length - 1 && !rowIsNamed(last)) next.pop()
+    onChangeRows(next)
   }
+  const setRating = (id: string, field: "support" | "likelihood", value: Rating | null) =>
+    onChangeRows(rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)))
+  const removeRow = (id: string) => onChangeRows(rows.filter((row) => row.id !== id))
 
   return (
     <article
@@ -307,7 +338,7 @@ export function RecallEntryCard({
         </div>
         {open && confirmingRemove && (
           <span className="-mt-0.5 flex shrink-0 items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">Remove this entry?</span>
+            <span className="text-muted-foreground">Remove this highlight?</span>
             <button
               type="button"
               onClick={onRemove}
@@ -328,102 +359,128 @@ export function RecallEntryCard({
           <button
             type="button"
             onClick={() => setConfirmingRemove(true)}
-            title="Remove this entry"
+            title="Remove this highlight"
             className="-mr-1 -mt-0.5 shrink-0 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           >
             <X className="h-3.5 w-3.5" />
-            <span className="sr-only">Remove entry {number}</span>
+            <span className="sr-only">Remove highlight {number}</span>
           </button>
         )}
       </header>
 
-      <div className="flex flex-col gap-4 border-t border-border px-4 pb-4 pt-3">
-        {/* The rows so far, each laid out as the template reads. */}
-        {entry.rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No rows yet.</p>
-        ) : (
-          <ol className="flex flex-col gap-2">
-            {entry.rows.map((row, index) => (
-              <li
-                key={row.id}
-                onClick={open ? () => editRow(row) : undefined}
-                title={open ? "Click to change this row" : undefined}
-                className={cn(
-                  "rounded-lg border border-border/70 bg-background px-3 py-2.5",
-                  open && "cursor-pointer hover:border-input",
-                  editingId === row.id && "border-primary bg-brand-soft/40",
-                )}
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="mr-1 font-mono text-[11px] font-semibold text-muted-foreground">Row {index + 1}</span>
-                  <Ratings likelihood={row.likelihood} support={row.support} />
-                  {open && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (editingId === row.id) resetForm()
-                        onRemoveRow(row.id)
-                      }}
-                      title="Remove this row"
-                      className="ml-auto rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      <X className="h-3 w-3" />
-                      <span className="sr-only">Remove row {index + 1}</span>
-                    </button>
+      {open ? (
+        <div className="flex flex-col gap-4 border-t border-border px-4 pb-4 pt-3">
+          {/* 1. The hypotheses, one box each. */}
+          <div className="flex flex-col gap-2">
+            <p className={QUESTION}>1. {RECALL_TEMPLATE.hypothesis}</p>
+            {slots.map((row, index) => (
+              <div key={row?.id ?? nextId} className="flex items-start gap-2">
+                <label htmlFor={`${suggestionsId}-h${index}`} className="w-[88px] shrink-0 pt-1.5 text-xs text-muted-foreground">
+                  Hypothesis {index + 1}:
+                </label>
+                <div className="min-w-0 flex-1">
+                  <input
+                    id={`${suggestionsId}-h${index}`}
+                    value={row?.hypothesis ?? ""}
+                    onChange={(event) => setHypothesis(index, event.target.value)}
+                    list={suggestions.length > 0 ? suggestionsId : undefined}
+                    className={BOX}
+                  />
+                  {row?.legacy && (
+                    <>
+                      <Answer question={RECALL_TEMPLATE.legacyV5.why} text={row.legacy.why} />
+                      <Answer question={RECALL_TEMPLATE.legacyV5.told} text={row.legacy.told} />
+                    </>
                   )}
                 </div>
-                <Answer question={WHY_QUESTION} text={row.why} />
-                <Answer question={TOLD_QUESTION} text={row.told} />
-                <Answer question="Notes" text={row.notes} />
-              </li>
+                {row && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    title={`Remove hypothesis ${index + 1}`}
+                    className="mt-1 shrink-0 rounded-full p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  >
+                    <X className="h-3 w-3" />
+                    <span className="sr-only">Remove hypothesis {index + 1}</span>
+                  </button>
+                )}
+              </div>
             ))}
-          </ol>
-        )}
+            {suggestions.length > 0 && (
+              <datalist id={suggestionsId}>
+                {suggestions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            )}
+          </div>
 
-        {/* The form: how a row is added, or changed once clicked. */}
-        {open && (
-          <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-lg border border-border bg-background p-3">
-            <Field label={WHY_QUESTION}>
-              <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
-            </Field>
-            <Field label={TOLD_QUESTION}>
-              <textarea rows={2} value={form.told} onChange={(event) => setForm({ ...form, told: event.target.value })} className={cn(BOX, "resize-none")} />
-            </Field>
-            <div className={cn("flex gap-2.5", scale === "verbal" ? "flex-col" : "flex-wrap items-end")}>
-              <RatingField
-                label="Likelihood"
-                scale={scale}
-                range={LIKELIHOOD_RANGE}
-                anchors={VERBAL_ANCHORS.likelihood}
-                value={form.likelihood}
-                onChange={(likelihood) => setForm({ ...form, likelihood })}
-              />
-              <RatingField
-                label="Information support"
-                scale={scale}
-                range={SUPPORT_RANGE}
-                anchors={VERBAL_ANCHORS.support}
-                value={form.support}
-                onChange={(support) => setForm({ ...form, support })}
-              />
+          {/* 2 and 3. Asked once per named hypothesis. */}
+          {named.length > 0 && (
+            <div className="flex flex-col gap-2.5">
+              {named.map(({ row, number: n }) => (
+                <RatingField
+                  key={row.id}
+                  label={`2${hypothesisLetter(n)}. ${hypothesisQuestion(RECALL_TEMPLATE.support, n)}`}
+                  labelClassName={QUESTION}
+                  scale={scale}
+                  range={SUPPORT_RANGE}
+                  anchors={verbal.support}
+                  value={row.support}
+                  onChange={(value) => setRating(row.id, "support", value)}
+                />
+              ))}
             </div>
-            <Field label="Notes">
-              <textarea rows={2} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className={cn(BOX, "resize-none")} />
-            </Field>
-            <div className="flex items-center gap-2">
-              <Button type="submit" size="sm" disabled={!canSubmit} className="h-8 rounded-md px-3">
-                {editingId ? "Save row" : "Add row"}
-              </Button>
-              {editingId && (
-                <Button type="button" variant="ghost" size="sm" onClick={resetForm} className="h-8 rounded-md px-2">
-                  Cancel
-                </Button>
-              )}
+          )}
+          {named.length > 0 && (
+            <div className="flex flex-col gap-2.5">
+              {named.map(({ row, number: n }) => (
+                <RatingField
+                  key={row.id}
+                  label={`3${hypothesisLetter(n)}. ${hypothesisQuestion(RECALL_TEMPLATE.likelihood, n)}`}
+                  labelClassName={QUESTION}
+                  scale={scale}
+                  range={LIKELIHOOD_RANGE}
+                  anchors={verbal.likelihood}
+                  value={row.likelihood}
+                  onChange={(value) => setRating(row.id, "likelihood", value)}
+                />
+              ))}
             </div>
-          </form>
-        )}
-      </div>
+          )}
+
+          <Field label={RECALL_TEMPLATE.notes}>
+            <textarea rows={2} value={entry.notes} onChange={(event) => onChangeNotes(event.target.value)} className={cn(BOX, "resize-none")} />
+          </Field>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 border-t border-border px-4 pb-4 pt-3">
+          {rows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No hypotheses yet.</p>
+          ) : (
+            <ol className="flex flex-col gap-2">
+              {rows.map((row, index) => (
+                <li key={row.id} className="rounded-lg border border-border/70 bg-background px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 font-mono text-[11px] font-semibold text-muted-foreground">Hypothesis {index + 1}</span>
+                    <Ratings support={row.support} likelihood={row.likelihood} />
+                  </div>
+                  {row.hypothesis && (
+                    <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-[18px] text-foreground">{row.hypothesis}</p>
+                  )}
+                  {row.legacy && (
+                    <>
+                      <Answer question={RECALL_TEMPLATE.legacyV5.why} text={row.legacy.why} />
+                      <Answer question={RECALL_TEMPLATE.legacyV5.told} text={row.legacy.told} />
+                    </>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          <Answer question={RECALL_TEMPLATE.notes} text={entry.notes} />
+        </div>
+      )}
     </article>
   )
 }
@@ -432,21 +489,24 @@ interface FinalDiagnosisCardProps {
   rows: FinalDiagnosisRow[]
   /** The scales the session's ratings are given on. */
   scale: RatingScale
+  /** The verbal anchors the session is on. */
+  anchors: AnchorSet
   onChange: (rows: FinalDiagnosisRow[]) => void
   cardRef?: (element: HTMLElement | null) => void
 }
 
-const EMPTY_DIAGNOSIS = { diagnosis: "", likelihood: "", why: "", difficulty: "" }
+const EMPTY_DIAGNOSIS = { diagnosis: "", likelihood: null as Rating | null, why: "", difficulty: "" }
 
 /**
  * The closing table: the diagnoses the clinician settled on, how likely,
  * why, and how difficult the case was (free text on the numeric scales, one
- * of the anchors on the verbal ones). Same shape as the entries: the table
- * is the summary, the form below adds a row, clicking a row changes it.
+ * of the anchors on the verbal ones). The table is the summary, the form
+ * below adds a row, clicking a row changes it.
  */
-export function FinalDiagnosisCard({ rows, scale, onChange, cardRef }: FinalDiagnosisCardProps) {
+export function FinalDiagnosisCard({ rows, scale, anchors, onChange, cardRef }: FinalDiagnosisCardProps) {
   const [form, setForm] = useState(EMPTY_DIAGNOSIS)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const verbal = VERBAL_ANCHOR_SETS[anchors]
 
   const resetForm = () => {
     setEditingId(null)
@@ -454,23 +514,13 @@ export function FinalDiagnosisCard({ rows, scale, onChange, cardRef }: FinalDiag
   }
   const editRow = (row: FinalDiagnosisRow) => {
     setEditingId(row.id)
-    setForm({
-      diagnosis: row.diagnosis,
-      likelihood: row.likelihood !== null ? String(row.likelihood) : "",
-      why: row.why,
-      difficulty: row.difficulty,
-    })
+    setForm({ diagnosis: row.diagnosis, likelihood: row.likelihood, why: row.why, difficulty: row.difficulty })
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     const diagnosis = form.diagnosis.trim()
     if (!diagnosis) return
-    const values = {
-      diagnosis,
-      likelihood: readRating(form.likelihood, scale, LIKELIHOOD_RANGE),
-      why: form.why.trim(),
-      difficulty: form.difficulty.trim(),
-    }
+    const values = { diagnosis, likelihood: form.likelihood, why: form.why.trim(), difficulty: form.difficulty.trim() }
     if (editingId) onChange(rows.map((row) => (row.id === editingId ? { ...row, ...values } : row)))
     else onChange([...rows, { id: crypto.randomUUID(), ...values }])
     resetForm()
@@ -479,6 +529,17 @@ export function FinalDiagnosisCard({ rows, scale, onChange, cardRef }: FinalDiag
     if (editingId === id) resetForm()
     onChange(rows.filter((row) => row.id !== id))
   }
+
+  const likelihoodField = (
+    <RatingField
+      label="Likelihood"
+      scale={scale}
+      range={LIKELIHOOD_RANGE}
+      anchors={verbal.likelihood}
+      value={form.likelihood}
+      onChange={(likelihood) => setForm({ ...form, likelihood })}
+    />
+  )
 
   return (
     <section ref={cardRef} className={cn(CARD, "shrink-0 border-border")}>
@@ -541,27 +602,9 @@ export function FinalDiagnosisCard({ rows, scale, onChange, cardRef }: FinalDiag
             <Field label="Diagnosis" className="min-w-[200px] flex-1">
               <input value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} className={BOX} />
             </Field>
-            {scale === "numeric" && (
-              <RatingField
-                label="Likelihood"
-                scale={scale}
-                range={LIKELIHOOD_RANGE}
-                anchors={VERBAL_ANCHORS.likelihood}
-                value={form.likelihood}
-                onChange={(likelihood) => setForm({ ...form, likelihood })}
-              />
-            )}
+            {scale === "numeric" && likelihoodField}
           </div>
-          {scale === "verbal" && (
-            <RatingField
-              label="Likelihood"
-              scale={scale}
-              range={LIKELIHOOD_RANGE}
-              anchors={VERBAL_ANCHORS.likelihood}
-              value={form.likelihood}
-              onChange={(likelihood) => setForm({ ...form, likelihood })}
-            />
-          )}
+          {scale === "verbal" && likelihoodField}
           <div className={cn("grid gap-2.5", scale === "numeric" && "sm:grid-cols-2")}>
             <Field label="Why">
               <textarea rows={2} value={form.why} onChange={(event) => setForm({ ...form, why: event.target.value })} className={cn(BOX, "resize-none")} />
@@ -569,9 +612,9 @@ export function FinalDiagnosisCard({ rows, scale, onChange, cardRef }: FinalDiag
             {scale === "verbal" ? (
               <AnchorPicker
                 label="How difficult was the case?"
-                anchors={VERBAL_ANCHORS.difficulty}
-                value={form.difficulty}
-                onChange={(difficulty) => setForm({ ...form, difficulty })}
+                anchors={verbal.difficulty}
+                value={form.difficulty || null}
+                onChange={(difficulty) => setForm({ ...form, difficulty: typeof difficulty === "string" ? difficulty : "" })}
               />
             ) : (
               <Field label="How difficult was the case?">

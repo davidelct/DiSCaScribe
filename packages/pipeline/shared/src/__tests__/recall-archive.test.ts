@@ -210,3 +210,112 @@ test("a schema 5 export on the numeric scales keeps its numbers", () => {
   assert.equal(session.entries[0].rows[0].likelihood, 3)
   assert.equal(session.entries[0].rows[0].support, -4)
 })
+
+test("a schema 6 export restores hypothesis rows, the stop's notes, the anchor set and the origin version", () => {
+  const session = recallSessionFromArchive({
+    schema_version: 6,
+    encounter_id: "enc-5",
+    exported_at: "2026-10-11T09:00:00.000Z",
+    template: { name: "SR_TemplateV6 (October 2026 revision)", questions: {} },
+    migrated_from: 5,
+    clinician_speaker: 0,
+    scales: {
+      kind: "verbal",
+      anchor_set: "2026-09",
+      likelihood: ["Unlikely", "Somewhat unlikely", "Somewhat likely", "Very likely"],
+      support: ["Rejects", "Reduces the chance", "No change", "Increases the chance", "Confirms"],
+      difficulty: ["Very straightforward", "Somewhat straightforward", "Moderately difficult", "Very difficult"],
+    },
+    entries: [
+      {
+        number: 1,
+        id: "e-1",
+        turns: [{ index: 1, speaker: 1, speaker_label: "Patient", text: "It burns after meals." }],
+        rows: [
+          { id: "r-1", hypothesis: "Reflux", support: "Increases the chance", likelihood: "Somewhat likely", legacy: null },
+          {
+            id: "r-2",
+            hypothesis: "",
+            support: "Confirms",
+            likelihood: "Very likely",
+            legacy: { why: "Open question.", told: "Meal-related burning." },
+          },
+        ],
+        notes: "Revisit",
+        created_at: "2026-10-11T08:50:00.000Z",
+      },
+    ],
+    final_diagnosis: [{ diagnosis: "Reflux", likelihood: "Very likely", why: "Fits", difficulty: "Somewhat straightforward" }],
+    recording: null,
+  })
+  assert.ok(session)
+  assert.equal(session.version, 6)
+  if (session.version !== 6) throw new Error("unreachable")
+  assert.equal(session.scale, "verbal")
+  assert.equal(session.anchors, "2026-09")
+  assert.equal(session.migratedFrom, 5)
+  assert.deepEqual(session.entries[0].turns, [1])
+  assert.deepEqual(session.entries[0].rows, [
+    { id: "r-1", hypothesis: "Reflux", support: "Increases the chance", likelihood: "Somewhat likely" },
+    {
+      id: "r-2",
+      hypothesis: "",
+      support: "Confirms",
+      likelihood: "Very likely",
+      legacy: { why: "Open question.", told: "Meal-related burning." },
+    },
+  ])
+  assert.equal(session.entries[0].notes, "Revisit")
+  assert.deepEqual(session.finalDiagnosis, [
+    { id: "final-1", diagnosis: "Reflux", likelihood: "Very likely", why: "Fits", difficulty: "Somewhat straightforward" },
+  ])
+})
+
+test("a schema 6 export on the current anchors, begun on this version, carries no origin", () => {
+  const session = recallSessionFromArchive({
+    schema_version: 6,
+    encounter_id: "enc-6",
+    exported_at: "2026-10-11T09:00:00.000Z",
+    migrated_from: null,
+    clinician_speaker: 0,
+    scales: { kind: "verbal", anchor_set: "2026-10", likelihood: [], support: [], difficulty: [] },
+    entries: [
+      {
+        number: 1,
+        id: "e-1",
+        turns: [{ index: 0, speaker: 0, speaker_label: "GP", text: "Any fever?" }],
+        rows: [{ id: "r-1", hypothesis: "Infection", support: "Did not support", likelihood: "Unlikely", legacy: null }],
+        created_at: "2026-10-11T08:50:00.000Z",
+      },
+    ],
+    final_diagnosis: [],
+    recording: null,
+  })
+  assert.ok(session)
+  if (session.version !== 6) throw new Error("unreachable")
+  assert.equal(session.anchors, "2026-10")
+  assert.equal(session.migratedFrom, undefined)
+  assert.equal("legacy" in session.entries[0].rows[0], false)
+  assert.equal(session.entries[0].notes, "")
+})
+
+test("a schema 6 export without an anchor set, or on the numeric scales, lands on the current set", () => {
+  const base = {
+    schema_version: 6,
+    encounter_id: "enc-7",
+    exported_at: "2026-10-11T09:00:00.000Z",
+    clinician_speaker: null,
+    entries: [],
+    final_diagnosis: [],
+    recording: null,
+  }
+  const verbal = recallSessionFromArchive({ ...base, scales: { kind: "verbal" } })
+  const numeric = recallSessionFromArchive({ ...base, scales: { kind: "numeric", likelihood: { min: 0, max: 10 } } })
+  const stray = recallSessionFromArchive({ ...base, migrated_from: 6, scales: { kind: "verbal", anchor_set: "2026-10" } })
+  assert.ok(verbal && numeric && stray)
+  if (verbal.version !== 6 || numeric.version !== 6 || stray.version !== 6) throw new Error("unreachable")
+  assert.equal(verbal.anchors, "2026-10")
+  assert.equal(numeric.scale, "numeric")
+  assert.equal(numeric.anchors, "2026-10")
+  assert.equal(stray.migratedFrom, undefined)
+})

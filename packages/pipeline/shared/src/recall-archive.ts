@@ -5,18 +5,19 @@
  * buildRecallPayload in the render package): entries in transcript order with
  * every row as entered. The app stores the session it edits (RecallSession).
  * Exports keep every entry id, so they invert exactly; this turns one back.
- * Schema 5 exports (rows carrying the template's fields, rated on the scales
- * the export names: numbers on the numeric ones, anchor labels on the
- * verbal ones) restore to a version 5 session; schema 4 exports (the same
- * rows, before the scales could be chosen) to version 4; schema 3 exports
- * (named hypotheses rated per stop, with carried-over likelihoods written
- * out with their source) to the version 3 shape. The app migrates the older
- * two on load. The shapes are restated here, not imported, so the pipeline
- * stays free of the render package.
+ * Schema 6 exports (SR_TemplateV6: a hypothesis per row with its two
+ * ratings, notes per stop, and the verbal anchor set named) restore to a
+ * version 6 session; schema 5 exports (rows answering the earlier template's two
+ * questions, rated on the scales the export names: numbers on the numeric
+ * ones, anchor labels on the verbal ones) to version 5; schema 4 exports
+ * (the same rows, before the scales could be chosen) to version 4; schema
+ * 3 exports (named hypotheses rated per stop, with carried-over likelihoods
+ * written out with their source) to the version 3 shape. The app migrates
+ * the older three on load. The shapes are restated here, not imported, so
+ * the pipeline stays free of the render package.
  */
 
-/** A rating as given: a number on the numeric scales, an anchor's label on the verbal ones. */
-type Rating = number | string
+import { CURRENT_ANCHOR_SET, isAnchorSet, type AnchorSet, type Rating } from "./recall-template"
 
 interface RestoredBase {
   finalDiagnosis: Array<{ id: string; diagnosis: string; likelihood: Rating | null; why: string; difficulty: string }>
@@ -43,6 +44,30 @@ interface RestoredTemplateEntry {
   createdAt: string
 }
 
+interface RestoredTemplateEntryV6 {
+  id: string
+  turns: number[]
+  rows: Array<{
+    id: string
+    hypothesis: string
+    support: Rating | null
+    likelihood: Rating | null
+    /** The answers a row carried over from before V6 gave to that template's questions. */
+    legacy?: { why: string; told: string }
+  }>
+  notes: string
+  createdAt: string
+}
+
+export interface RestoredRecallSessionV6 extends RestoredBase {
+  version: 6
+  scale: "numeric" | "verbal"
+  anchors: AnchorSet
+  /** The version the session was begun on, when earlier than 6. */
+  migratedFrom?: 2 | 3 | 4 | 5
+  entries: RestoredTemplateEntryV6[]
+}
+
 export interface RestoredRecallSessionV5 extends RestoredBase {
   version: 5
   scale: "numeric" | "verbal"
@@ -66,7 +91,11 @@ export interface RestoredRecallSessionV3 extends RestoredBase {
   }>
 }
 
-export type RestoredRecallSession = RestoredRecallSessionV5 | RestoredRecallSessionV4 | RestoredRecallSessionV3
+export type RestoredRecallSession =
+  | RestoredRecallSessionV6
+  | RestoredRecallSessionV5
+  | RestoredRecallSessionV4
+  | RestoredRecallSessionV3
 
 type Json = Record<string, unknown>
 
@@ -107,6 +136,32 @@ export function recallSessionFromArchive(raw: unknown): RestoredRecallSession | 
   if (!isArchivedRecallPayload(raw)) return null
   const payload = raw as Json
   const shared = restoreShared(payload)
+
+  if (payload.schema_version === 6) {
+    const scales = isObject(payload.scales) ? payload.scales : null
+    const entries: RestoredTemplateEntryV6[] = list(payload.entries).map((entry, index) => ({
+      id: text(entry.id) || `entry-${index + 1}`,
+      turns: turnIndexes(entry),
+      rows: list(entry.rows).map((row, rowIndex) => ({
+        id: text(row.id) || `row-${index + 1}-${rowIndex + 1}`,
+        hypothesis: text(row.hypothesis),
+        support: ratingOrNull(row.support),
+        likelihood: ratingOrNull(row.likelihood),
+        ...(isObject(row.legacy) ? { legacy: { why: text(row.legacy.why), told: text(row.legacy.told) } } : {}),
+      })),
+      notes: text(entry.notes),
+      createdAt: text(entry.created_at),
+    }))
+    const migratedFrom = payload.migrated_from
+    return {
+      version: 6,
+      scale: scales?.kind === "verbal" ? "verbal" : "numeric",
+      anchors: isAnchorSet(scales?.anchor_set) ? scales.anchor_set : CURRENT_ANCHOR_SET,
+      ...(migratedFrom === 2 || migratedFrom === 3 || migratedFrom === 4 || migratedFrom === 5 ? { migratedFrom } : {}),
+      entries,
+      ...shared,
+    }
+  }
 
   if (payload.schema_version === 4 || payload.schema_version === 5) {
     const entries: RestoredTemplateEntry[] = list(payload.entries).map((entry, index) => ({

@@ -31,7 +31,8 @@ export interface UserPreferences {
    * (likelihood 0–10, support −10..+10, difficulty as text) or verbal
    * anchors. Follows the last choice made in this browser, so a run of
    * interviews on one set needs choosing once; each session then keeps its
-   * own, and the export records it.
+   * own, and the export records it. Absent means verbal, the scales the
+   * current template draws.
    */
   recallScale?: "numeric" | "verbal"
 }

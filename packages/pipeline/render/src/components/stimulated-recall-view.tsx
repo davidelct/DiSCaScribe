@@ -6,13 +6,12 @@ import { getEncounterAudio, saveEncounterAudio } from "@storage/audio-store"
 import { useAudioRecorder, compressAudioFileToMp3 } from "@audio"
 import { Button } from "@ui/lib/ui/button"
 import { cn } from "@ui/lib/utils"
-import { guessClinicianSpeaker, heuristicRecallExchanges } from "@pipeline-errors"
-import { Check, Download, Loader2, Lock, Mic, Pause, Play, Plus, RotateCcw, Square } from "lucide-react"
+import { RECALL_TEMPLATE, guessClinicianSpeaker } from "@pipeline-errors"
+import { Check, ChevronRight, Download, Loader2, Lock, Mic, Pause, Play, RotateCcw, Square } from "lucide-react"
 import { AudioPlayer } from "./audio-player"
 import { RecallTranscript } from "./recall-transcript"
-import { FinalDiagnosisCard, RecallEntryCard, type EntryRowInput } from "./recall-entry"
+import { FinalDiagnosisCard, RecallEntryCard } from "./recall-entry"
 import {
-  VERBAL_ANCHORS,
   buildRecallPayload,
   emptyRecallSession,
   loadRecallSession,
@@ -20,6 +19,8 @@ import {
   recallAudioKey,
   rememberRecallScale,
   saveRecallSession,
+  sessionAnchors,
+  sessionAnchorsAfterEdit,
   sessionHasRatings,
   toUtterances,
   type RatingScale,
@@ -28,19 +29,23 @@ import {
 } from "./recall-session"
 
 /**
- * Stimulated Recall (WT3.1).
+ * Stimulated Recall (WT3.1), on SR_TemplateV6 as Olga revised it.
  *
- * Two columns. Left, the consultation transcript as it reads in the
- * consultation view, every turn clickable and the question–answer exchanges
- * bracketed (detected by a small model beside note generation, or by a
- * question-mark heuristic until then). Right, the template's table once per
- * stop in transcript order: a row per thought, each answering why the
- * question was asked and what the answer told the clinician, with the
- * hypothesis's likelihood and how much the answer supported it, plus notes.
- * The ratings are given on the numeric scales or on verbal anchors, chosen
- * per session (above the prompt) until the first rating fixes it. The
- * recall interview can be recorded alongside, with every turn click timed
- * against the recording.
+ * A slim toolbar (the scales folded behind a toggle, the scale switch,
+ * recording and export), then two columns. Left, the consultation
+ * transcript in larger type than the consultation view, with one line of
+ * instruction: please highlight important information. The clinician
+ * leads: ticking a turn highlights it (yellow, for the rest of the
+ * interview) and opens its questions on the right; further ticks join the
+ * open highlight, so one can span several turns. Right, the template's
+ * three questions once per highlight, in transcript order: the hypotheses
+ * the information was important to, and for each how much it supported
+ * it and how likely it became, plus notes. The ratings are given on the
+ * numeric scales or on the session's verbal anchors, chosen per session
+ * until the first rating fixes it. The recall interview can be recorded
+ * alongside, with every turn click timed against the recording. The
+ * speaker labels come from the recall analysis made beside note generation
+ * (which speaker is the clinician), or a guess until then.
  */
 
 type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "skipped" | "failed"
@@ -49,12 +54,8 @@ type RecallRecordingStatus = "idle" | "recording" | "saving" | "archived" | "ski
 const ARCHIVE_DELAY_MS = 30_000
 
 const CARD = "rounded-2xl border border-border bg-card shadow-soft"
-
-const PROMPT =
-  "Go back over the consultation as it happened and report only the thoughts you remember having at the time: " +
-  "tentative diagnoses, why you asked a question, what you made of the answer. Leave out what you know now and " +
-  "anything you are unsure of. For each row, rate how likely the hypothesis seemed then and how much the " +
-  "answer supported it. You need not be exhaustive."
+/** The row above each column: its name on the left, its controls on the right; the same height on both sides. */
+const COLUMN_HEADING = "flex min-h-7 shrink-0 items-center gap-3 px-1"
 
 function formatDuration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds))
@@ -104,10 +105,10 @@ function Scale({ title, labels, minorEvery, ends }: { title: string; labels: str
 }
 
 /**
- * One of the verbal scales: its anchors in order along a line, as Olga's
- * note lists them. One row per scale, the title beside the line rather than
- * above it, so the three together take no more of the page than the two
- * numeric drawings do.
+ * One of the verbal scales: its anchors in order along a line, as the
+ * template draws them. One row per scale, the title beside the line rather
+ * than above it, so the three together take no more of the page than the
+ * two numeric drawings do.
  */
 function VerbalScale({ title, anchors }: { title: string; anchors: readonly string[] }) {
   const inset = `${50 / anchors.length}%`
@@ -188,10 +189,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     () => (analysisFresh ? analysis?.clinician_speaker : guessClinicianSpeaker(turns)),
     [analysis, analysisFresh, turns],
   )
-  const exchanges = useMemo(
-    () => (analysisFresh && analysis ? analysis.exchanges : heuristicRecallExchanges(turns, clinicianSpeaker)),
-    [analysis, analysisFresh, clinicianSpeaker, turns],
-  )
   const speakerCount = useMemo(() => new Set(turns.map((turn) => turn.speaker)).size, [turns])
   const speakerLabel = useCallback(
     (speaker: number) =>
@@ -223,7 +220,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   }, [])
   const update = useCallback(
     (updater: (current: RecallSession) => RecallSession) => {
-      const next = updater(sessionRef.current)
+      const next = sessionAnchorsAfterEdit(updater(sessionRef.current))
       sessionRef.current = next
       setSession(next)
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -257,10 +254,9 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     }
   }, [encounter.id])
 
-  const [selected, setSelected] = useState<number[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [promptOpen, setPromptOpen] = useState(true)
-  const [detecting, setDetecting] = useState(false)
+  // The scale drawings are folded away; the anchors are on every question.
+  const [promptOpen, setPromptOpen] = useState(false)
   const [recallStatus, setRecallStatus] = useState<RecallRecordingStatus>("idle")
   const [hasRecallAudio, setHasRecallAudio] = useState(false)
   const [recallAudioVersion, setRecallAudioVersion] = useState(0)
@@ -283,7 +279,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   useEffect(() => {
     let cancelled = false
     setLoaded(false)
-    setSelected([])
     setActiveId(null)
     setRecallStatus("idle")
     setHasRecallAudio(false)
@@ -305,7 +300,8 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     }
   }, [encounter.id])
 
-  // Exchanges missing or stale: detect them once per open, quietly.
+  // Analysis missing or stale (which speaker is the clinician): run it
+  // once per open, quietly; the labels follow when the encounter updates.
   const detectRef = useRef(detectExchanges)
   useEffect(() => {
     detectRef.current = detectExchanges
@@ -315,10 +311,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     const detect = detectRef.current
     if (analysisFresh || turns.length < 2 || !detect || attemptedRef.current === encounter.id) return
     attemptedRef.current = encounter.id
-    setDetecting(true)
-    detect(encounter.transcript_text)
-      .catch(() => undefined)
-      .finally(() => setDetecting(false))
+    void detect(encounter.transcript_text).catch(() => undefined)
   }, [analysisFresh, encounter.id, encounter.transcript_text, turns.length])
 
   // ── Derived views ──────────────────────────────────────────────────────────
@@ -335,21 +328,25 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       })),
     [ordered, speakerLabel, turns],
   )
+  // Every hypothesis named so far, once each, for the hypothesis box to offer.
+  const hypothesisNames = useMemo(
+    () => [...new Set(session.entries.flatMap((entry) => entry.rows.map((row) => row.hypothesis.trim())).filter(Boolean))],
+    [session.entries],
+  )
   const entryByTurn = useMemo(() => {
     const map = new Map<number, RecallEntry>()
     for (const entry of session.entries) for (const index of entry.turns) map.set(index, entry)
     return map
   }, [session.entries])
   const openEntry = activeId ? session.entries.find((entry) => entry.id === activeId) ?? null : null
-  const checkedTurns = openEntry ? openEntry.turns : selected
+  const checkedTurns = openEntry ? openEntry.turns : []
   const transcriptEntries = useMemo(
     () => entryViews.map((view) => ({ id: view.entry.id, number: view.number, turns: view.entry.turns })),
     [entryViews],
   )
 
-  // ── Selection and entries ──────────────────────────────────────────────────
+  // ── Highlights ─────────────────────────────────────────────────────────────
   const activateEntry = (id: string, scrollTranscript: boolean) => {
-    setSelected([])
     setActiveId(id)
     requestAnimationFrame(() => entryRefs.current.get(id)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
     if (scrollTranscript) {
@@ -370,30 +367,26 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     )
   }
 
-  // Ticking a turn in a question–answer exchange ticks the whole exchange;
-  // unticking takes off just that box. With an entry open, the boxes are
-  // that entry's turns and ticking edits them; otherwise they are the pick
-  // for a new entry.
+  // Ticking a turn with nothing open highlights it: a new entry, opened at
+  // once so its questions appear. With an entry open, ticks edit that
+  // entry's turns, so a highlight can span several; unticking its last turn
+  // removes it. A turn already in another entry stays with it.
   const toggleTurn = (index: number, checked: boolean) => {
     logTurnClick(index)
-    const exchange = exchanges.find((candidate) => index >= candidate.question && index <= candidate.answer_end)
-    const group = exchange
-      ? Array.from({ length: exchange.answer_end - exchange.question + 1 }, (_, k) => exchange.question + k)
-      : [index]
     if (openEntry) {
-      const others = new Set([...entryByTurn.entries()].filter(([, entry]) => entry.id !== openEntry.id).map(([i]) => i))
+      const owner = entryByTurn.get(index)
+      if (checked && owner && owner.id !== openEntry.id) return
       const turns = checked
-        ? [...new Set([...openEntry.turns, ...group.filter((i) => !others.has(i))])].sort((a, b) => a - b)
+        ? [...new Set([...openEntry.turns, index])].sort((a, b) => a - b)
         : openEntry.turns.filter((i) => i !== index)
-      if (turns.length === 0) return // an entry keeps at least one turn; remove the entry instead
-      patchEntry(openEntry.id, { turns })
+      if (turns.length === 0) removeEntry(openEntry.id)
+      else patchEntry(openEntry.id, { turns })
       return
     }
-    setSelected((current) => {
-      if (!checked) return current.filter((i) => i !== index)
-      const additions = group.filter((i) => !entryByTurn.has(i))
-      return [...new Set([...current, ...additions])].sort((a, b) => a - b)
-    })
+    if (!checked || entryByTurn.has(index)) return
+    const entry: RecallEntry = { id: crypto.randomUUID(), turns: [index], rows: [], notes: "", createdAt: new Date().toISOString() }
+    update((current) => ({ ...current, entries: [...current.entries, entry] }))
+    activateEntry(entry.id, false)
   }
 
   // A turn of another entry opens that entry.
@@ -402,8 +395,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     if (first !== undefined) logTurnClick(first)
     activateEntry(id, false)
   }
-
-  const clearSelection = () => setSelected([])
 
   // The scales are chosen before the first rating and remembered for the
   // next session; the choice is saved with the session like any edit.
@@ -414,7 +405,7 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
     update((current) => ({ ...current, scale }))
   }
 
-  // Escape clears the selection, or closes the open table when nothing is selected.
+  // Escape leaves a box, then closes the open highlight.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
@@ -423,25 +414,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
         target.blur()
         return
       }
-      if (selected.length > 0) setSelected([])
-      else setActiveId(null)
+      setActiveId(null)
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
-  }, [selected.length])
-
-  const addEntry = () => {
-    if (selected.length === 0) return
-    const entry: RecallEntry = {
-      id: crypto.randomUUID(),
-      turns: [...selected].sort((a, b) => a - b),
-      rows: [],
-      createdAt: new Date().toISOString(),
-    }
-    update((current) => ({ ...current, entries: [...current.entries, entry] }))
-    setSelected([])
-    activateEntry(entry.id, false)
-  }
+  }, [])
 
   const removeEntry = (id: string) => {
     update((current) => ({ ...current, entries: current.entries.filter((entry) => entry.id !== id) }))
@@ -454,22 +431,6 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       entries: current.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
     }))
 
-  // Rows belong to their stop: the template's four fields, as entered.
-  const addRow = (entryId: string, row: EntryRowInput) =>
-    patchRows(entryId, (rows) => [...rows, { id: crypto.randomUUID(), ...row }])
-
-  const saveRow = (entryId: string, rowId: string, row: EntryRowInput) =>
-    patchRows(entryId, (rows) => rows.map((existing) => (existing.id === rowId ? { ...existing, ...row } : existing)))
-
-  const removeRow = (entryId: string, rowId: string) =>
-    patchRows(entryId, (rows) => rows.filter((existing) => existing.id !== rowId))
-
-  function patchRows(entryId: string, change: (rows: RecallEntry["rows"]) => RecallEntry["rows"]) {
-    update((current) => ({
-      ...current,
-      entries: current.entries.map((entry) => (entry.id === entryId ? { ...entry, rows: change(entry.rows) } : entry)),
-    }))
-  }
 
   // ── Recording, archival, export ───────────────────────────────────────────
   const sessionPayload = useCallback(
@@ -478,12 +439,10 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
         encounterId: encounter.id,
         session: sessionRef.current,
         turns,
-        exchanges,
-        exchangesDetected: analysisFresh,
         clinicianSpeaker,
         speakerLabel,
       }),
-    [analysisFresh, clinicianSpeaker, encounter.id, exchanges, speakerLabel, turns],
+    [clinicianSpeaker, encounter.id, speakerLabel, turns],
   )
 
   // Refreshes the archive's copy of the session alone; the recording goes
@@ -634,21 +593,21 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
   const nothingToExport = session.entries.length === 0
 
   return (
-    <div className="flex flex-col gap-4 lg:min-h-0 lg:flex-1">
-      {/* The interview's script and scales, with the recording and export
-          actions: the row that stays when the prompt is folded away. */}
-      <section className={cn(CARD, "shrink-0")}>
-        <div className="flex min-h-8 flex-wrap items-center gap-3 px-5 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Recall prompt</h2>
-          <button
-            type="button"
-            onClick={() => setPromptOpen((open) => !open)}
-            aria-expanded={promptOpen}
-            className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-          >
-            {promptOpen ? "Hide" : "Show"}
-          </button>
-          {loaded && <ScaleChoice value={session.scale} locked={scaleLocked} onChange={chooseScale} />}
+    <div className="flex flex-col gap-3 lg:min-h-0 lg:flex-1">
+      {/* One slim row: the template's instruction and scales folded behind a
+          toggle, the scale switch, and the recording and export actions, so
+          the transcript and the recall get the page. */}
+      <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-3 px-1">
+        <button
+          type="button"
+          onClick={() => setPromptOpen((open) => !open)}
+          aria-expanded={promptOpen}
+          className="inline-flex items-center gap-1 rounded text-sm font-semibold text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", promptOpen && "rotate-90")} />
+          Scales
+        </button>
+        {loaded && <ScaleChoice value={session.scale} locked={scaleLocked} onChange={chooseScale} />}
           <div className="ml-auto flex items-center gap-2">
             {recallStatus === "recording" ? (
               <span className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card pl-2.5 pr-1">
@@ -710,40 +669,38 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
               <span className="text-xs">Export</span>
             </Button>
           </div>
-        </div>
-        {promptOpen && (
-          <div
-            className={cn(
-              "grid gap-x-10 gap-y-4 border-t border-border px-5 py-4 lg:items-center",
-              session.scale === "verbal" ? "lg:grid-cols-[minmax(0,1fr)_600px]" : "lg:grid-cols-[minmax(0,1fr)_520px]",
-            )}
-          >
-            <p className="text-[13.5px] leading-[21px] text-foreground/90">{PROMPT}</p>
+      </div>
+      {promptOpen && (
+        <section className={cn(CARD, "shrink-0 px-5 py-4", session.scale === "verbal" ? "max-w-[680px]" : "max-w-[600px]")}>
             {session.scale === "verbal" ? (
               <div className="grid gap-2.5">
-                <VerbalScale title="Likelihood" anchors={VERBAL_ANCHORS.likelihood} />
-                <VerbalScale title="Information support" anchors={VERBAL_ANCHORS.support} />
-                <VerbalScale title="How difficult was the case?" anchors={VERBAL_ANCHORS.difficulty} />
+                <VerbalScale title="Information support" anchors={sessionAnchors(session).support} />
+                <VerbalScale title="Likelihood" anchors={sessionAnchors(session).likelihood} />
+                <VerbalScale title="How difficult was the case?" anchors={sessionAnchors(session).difficulty} />
+                {session.anchors !== "2026-10" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    This recall was rated on the September 2026 anchors, so it stays on them.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="grid gap-8 sm:grid-cols-2">
-                <Scale
-                  title="Likelihood"
-                  labels={["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]}
-                  minorEvery={1}
-                  ends={["Highly unlikely", "Highly likely"]}
-                />
                 <Scale
                   title="Information support"
                   labels={["−10", "−5", "0", "+5", "+10"]}
                   minorEvery={5}
                   ends={["Rules out", "No effect", "Confirms"]}
                 />
+                <Scale
+                  title="Likelihood"
+                  labels={["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]}
+                  minorEvery={1}
+                  ends={["Highly unlikely", "Highly likely"]}
+                />
               </div>
             )}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {hasRecallAudio && recallStatus !== "recording" && (
         <AudioPlayer key={`${recallKey}:${recallAudioVersion}`} audioKey={recallKey} className={cn(CARD, "shrink-0 px-5 py-3")} />
@@ -754,62 +711,34 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,10fr)_minmax(0,11fr)]">
-          {/* Transcript */}
-          <section className={cn(CARD, "flex flex-col lg:min-h-0")}>
-            <div className="flex min-h-8 items-center gap-3 px-5 py-3">
+        <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,11fr)_minmax(0,10fr)]">
+          {/* Transcript: a heading row with the selection's controls, then
+              the turns in a card that scrolls on its own. */}
+          <section className="flex flex-col gap-3 lg:min-h-0">
+            <div className={COLUMN_HEADING}>
               <h2 className="text-sm font-semibold text-foreground">Transcript</h2>
-              {detecting && (
-                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Finding questions
-                </span>
+              <span className="text-xs text-muted-foreground">{RECALL_TEMPLATE.instruction}</span>
+              {openEntry && (
+                <div className="ml-auto flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    Highlight {entryViews.find((view) => view.entry.id === openEntry.id)?.number} · {openEntry.turns.length}{" "}
+                    {openEntry.turns.length === 1 ? "turn" : "turns"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveId(null)}
+                    className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  >
+                    Done
+                  </button>
+                </div>
               )}
-              <div className="ml-auto flex items-center gap-3">
-                {openEntry ? (
-                  <>
-                    <span className="text-xs text-muted-foreground">
-                      Entry {entryViews.find((view) => view.entry.id === openEntry.id)?.number} · {openEntry.turns.length}{" "}
-                      {openEntry.turns.length === 1 ? "turn" : "turns"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveId(null)}
-                      className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      Done
-                    </button>
-                  </>
-                ) : selected.length > 0 ? (
-                  <>
-                    <span className="text-xs text-muted-foreground">{selected.length} selected</span>
-                    <button
-                      type="button"
-                      onClick={clearSelection}
-                      className="text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                    >
-                      Clear
-                    </button>
-                    <Button size="sm" onClick={addEntry} className="h-7 rounded-md px-2.5">
-                      <Plus className="mr-1 h-3.5 w-3.5" />
-                      <span className="text-xs">Add recall</span>
-                    </Button>
-                  </>
-                ) : (
-                  exchanges.length > 0 && (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span aria-hidden className="inline-block h-3 w-0.5 rounded-full bg-primary/40" />
-                      question and answer
-                    </span>
-                  )
-                )}
-              </div>
             </div>
-            <div className="border-t border-border px-5 py-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+            <div className={cn(CARD, "px-5 py-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto")}>
               <RecallTranscript
                 turns={turns}
                 speakerLabel={speakerLabel}
                 accentSpeaker={accentSpeaker}
-                exchanges={exchanges}
                 entries={transcriptEntries}
                 openEntryId={activeId}
                 checked={checkedTurns}
@@ -822,12 +751,17 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
             </div>
           </section>
 
-          {/* Recall: one table per stop, in transcript order */}
-          <section className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-            <h2 className="shrink-0 px-1 text-sm font-semibold text-foreground">Recall</h2>
+          {/* Recall: the same heading row, then one card per stop in
+              transcript order and the final diagnosis, scrolling together. */}
+          <section className="flex flex-col gap-3 lg:min-h-0">
+            <div className={COLUMN_HEADING}>
+              <h2 className="text-sm font-semibold text-foreground">Recall</h2>
+            </div>
+            <div className="flex flex-col gap-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {entryViews.length === 0 && (
               <p className="px-1 text-xs text-muted-foreground">
-                Select the turns the clinician stopped at in the transcript, then add a recall.
+                Highlight an answer from the patient, or an examination or investigation result, that was important
+                for your thinking: its questions appear here.
               </p>
             )}
             {entryViews.map((view) => (
@@ -836,12 +770,13 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
                 number={view.number}
                 entry={view.entry}
                 scale={session.scale}
+                anchors={session.anchors}
+                hypothesisSuggestions={hypothesisNames}
                 excerpt={view.excerpt}
                 open={view.entry.id === activeId}
                 onOpen={() => activateEntry(view.entry.id, true)}
-                onAddRow={(row) => addRow(view.entry.id, row)}
-                onSaveRow={(rowId, row) => saveRow(view.entry.id, rowId, row)}
-                onRemoveRow={(rowId) => removeRow(view.entry.id, rowId)}
+                onChangeRows={(rows) => patchEntry(view.entry.id, { rows })}
+                onChangeNotes={(notes) => patchEntry(view.entry.id, { notes })}
                 onRemove={() => removeEntry(view.entry.id)}
                 cardRef={(element) => {
                   if (element) entryRefs.current.set(view.entry.id, element)
@@ -852,8 +787,10 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
             <FinalDiagnosisCard
               rows={session.finalDiagnosis}
               scale={session.scale}
+              anchors={session.anchors}
               onChange={(rows) => update((current) => ({ ...current, finalDiagnosis: rows }))}
             />
+            </div>
           </section>
         </div>
       )}

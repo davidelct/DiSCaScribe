@@ -122,7 +122,7 @@ function RecallWorkspaceContent({ encounterId }: { encounterId: string }) {
         </div>
         {/* The two columns scroll on their own from lg up; narrower than
             that they stack and the page scrolls. */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-4 lg:overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-3 lg:overflow-hidden">
           <StimulatedRecallView encounter={encounter} detectExchanges={detectExchanges} />
         </div>
       </main>
