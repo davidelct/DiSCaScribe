@@ -18,6 +18,7 @@ import {
   SUPPORT_RANGE,
   type FinalDiagnosisRow,
   type RatingScale,
+  rowHasContent,
   type RecallEntry,
   type RecallRow,
 } from "./recall-session"
@@ -246,9 +247,7 @@ export interface EntryExcerptLine {
 }
 
 /** Whether a row has anything to ask the rating questions about: a name, a rating already, or carried-over answers. */
-function rowIsNamed(row: RecallRow): boolean {
-  return Boolean(row.hypothesis.trim() || row.legacy || row.support !== null || row.likelihood !== null)
-}
+const rowIsNamed = rowHasContent
 
 interface RecallEntryCardProps {
   number: number
@@ -309,11 +308,15 @@ export function RecallEntryCard({
       setNextId(crypto.randomUUID())
       return
     }
-    const next = rows.map((row, i) => (i === index ? { ...row, hypothesis } : row))
-    // The last box emptied again, with nothing rated: it goes, so the stop does not keep a blank hypothesis.
-    const last = next[next.length - 1]
-    if (index === next.length - 1 && !rowIsNamed(last)) next.pop()
-    onChangeRows(next)
+    onChangeRows(rows.map((row, i) => (i === index ? { ...row, hypothesis } : row)))
+  }
+  // A box emptied and left (nothing rated, nothing carried over) takes its
+  // row with it, so the stop keeps no blank hypothesis. Done on leaving the
+  // box, not while typing, so the input being typed in is never unmounted
+  // mid-word and a name can be cleared and retyped in place.
+  const pruneRow = (id: string) => {
+    const row = rows.find((candidate) => candidate.id === id)
+    if (row && !rowIsNamed(row)) onChangeRows(rows.filter((candidate) => candidate.id !== id))
   }
   const setRating = (id: string, field: "support" | "likelihood", value: Rating | null) =>
     onChangeRows(rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)))
@@ -383,6 +386,7 @@ export function RecallEntryCard({
                     id={`${suggestionsId}-h${index}`}
                     value={row?.hypothesis ?? ""}
                     onChange={(event) => setHypothesis(index, event.target.value)}
+                    onBlur={row ? () => pruneRow(row.id) : undefined}
                     list={suggestions.length > 0 ? suggestionsId : undefined}
                     className={BOX}
                   />

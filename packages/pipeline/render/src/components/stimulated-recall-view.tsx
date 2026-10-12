@@ -369,8 +369,11 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
 
   // Ticking a turn with nothing open highlights it: a new entry, opened at
   // once so its questions appear. With an entry open, ticks edit that
-  // entry's turns, so a highlight can span several; unticking its last turn
-  // removes it. A turn already in another entry stays with it.
+  // entry's turns, so a highlight can span several. Unticking its last turn
+  // removes it while it is still blank (an accidental highlight); once it
+  // holds answers the click only closes it, and the card's X, which asks
+  // first, is the way to remove it. A turn already in another entry stays
+  // with it.
   const toggleTurn = (index: number, checked: boolean) => {
     logTurnClick(index)
     if (openEntry) {
@@ -379,8 +382,9 @@ export function StimulatedRecallView({ encounter, detectExchanges }: StimulatedR
       const turns = checked
         ? [...new Set([...openEntry.turns, index])].sort((a, b) => a - b)
         : openEntry.turns.filter((i) => i !== index)
-      if (turns.length === 0) removeEntry(openEntry.id)
-      else patchEntry(openEntry.id, { turns })
+      if (turns.length > 0) patchEntry(openEntry.id, { turns })
+      else if (openEntry.rows.length === 0 && !openEntry.notes.trim()) removeEntry(openEntry.id)
+      else setActiveId(null)
       return
     }
     if (!checked || entryByTurn.has(index)) return

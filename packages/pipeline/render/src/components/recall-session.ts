@@ -327,6 +327,11 @@ export async function saveRecallSession(encounterId: string, session: RecallSess
   await putSharedRecallSession(encounterId, session)
 }
 
+/** Whether a row says anything: a hypothesis, a rating, or answers carried over from the earlier template. */
+export function rowHasContent(row: RecallRow): boolean {
+  return Boolean(row.hypothesis.trim() || row.legacy || row.support !== null || row.likelihood !== null)
+}
+
 /** Entries in transcript order: numbering follows the consultation, not the order the stops were made in. */
 export function orderedEntries(session: RecallSession): RecallEntry[] {
   return [...session.entries].sort(
@@ -426,8 +431,9 @@ export function buildRecallPayload(input: RecallPayloadInput) {
         speaker_label: turns[index] ? speakerLabel(turns[index].speaker) : null,
         text: turns[index]?.text ?? "",
       })),
-      // One row per hypothesis, its fields as entered; "Hypothesis N" is the row's position.
-      rows: entry.rows.map((row) => ({
+      // One row per hypothesis, its fields as entered; "Hypothesis N" is the
+      // row's position. A box left blank with nothing rated is not a row.
+      rows: entry.rows.filter(rowHasContent).map((row) => ({
         id: row.id,
         hypothesis: row.hypothesis,
         support: row.support,
