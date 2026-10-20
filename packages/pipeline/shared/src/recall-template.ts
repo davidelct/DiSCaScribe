@@ -15,10 +15,11 @@ export type Rating = number | string
  * - "2026-09": Olga Kostopoulou's anchors (September 2026), the first
  *   verbal set trialled; four for likelihood and difficulty, five for
  *   support, the support scale running from against to for.
- * - "2026-10": SR_TemplateV6 as Olga revised it (October 2026): four for
- *   support, one-directional (did not support → practically confirmed),
- *   five for likelihood. The template gives no difficulty scale; the
- *   September anchors are kept for it.
+ * - "2026-10": SR_TemplateV6 as Olga revised it (October 2026): five for
+ *   support, from "practically rejected" (added on 13 October, after the
+ *   first cut had no "against" end) to "practically confirmed", five for
+ *   likelihood. The template gives no difficulty scale; the September
+ *   anchors are kept for it.
  */
 export type AnchorSet = "2026-09" | "2026-10"
 
@@ -42,7 +43,7 @@ export const VERBAL_ANCHOR_SETS: Record<AnchorSet, VerbalAnchors> = {
   },
   "2026-10": {
     likelihood: ["Unlikely", "Somewhat likely", "Likely", "Highly likely", "Almost certain"],
-    support: ["Did not support", "Somewhat supported", "Strongly supported", "Practically confirmed"],
+    support: ["Practically rejected", "Did not support", "Somewhat supported", "Strongly supported", "Practically confirmed"],
     difficulty: DIFFICULTY_ANCHORS,
   },
 }
@@ -53,9 +54,8 @@ export function isAnchorSet(value: unknown): value is AnchorSet {
 
 /**
  * Which way a support rating points: against the hypothesis (−1), neither
- * (0), or for it (1). Numbers by sign. The September labels run from
- * against to for; the current scale has no "against" end, so its floor is
- * neutral and the rest are for. A label from neither set is neutral.
+ * (0), or for it (1). Numbers by sign; the labels of either set by where
+ * they sit. A label from neither set is neutral.
  */
 const SUPPORT_DIRECTIONS: Record<string, -1 | 0 | 1> = {
   Rejects: -1,
@@ -63,6 +63,7 @@ const SUPPORT_DIRECTIONS: Record<string, -1 | 0 | 1> = {
   "No change": 0,
   "Increases the chance": 1,
   Confirms: 1,
+  "Practically rejected": -1,
   "Did not support": 0,
   "Somewhat supported": 1,
   "Strongly supported": 1,

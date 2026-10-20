@@ -13,7 +13,13 @@ import {
 } from "../recall-template.js"
 
 test("the current anchors are Olga's October revision, and the September set is kept", () => {
-  assert.deepEqual(VERBAL_ANCHOR_SETS["2026-10"].support, ["Did not support", "Somewhat supported", "Strongly supported", "Practically confirmed"])
+  assert.deepEqual(VERBAL_ANCHOR_SETS["2026-10"].support, [
+    "Practically rejected",
+    "Did not support",
+    "Somewhat supported",
+    "Strongly supported",
+    "Practically confirmed",
+  ])
   assert.deepEqual(VERBAL_ANCHOR_SETS["2026-10"].likelihood, ["Unlikely", "Somewhat likely", "Likely", "Highly likely", "Almost certain"])
   assert.deepEqual(VERBAL_ANCHOR_SETS["2026-09"].support, ["Rejects", "Reduces the chance", "No change", "Increases the chance", "Confirms"])
   assert.deepEqual(VERBAL_ANCHOR_SETS["2026-09"].difficulty, VERBAL_ANCHOR_SETS["2026-10"].difficulty)
@@ -29,7 +35,8 @@ test("supportDirection reads numbers by sign and labels from either set", () => 
   assert.equal(supportDirection("No change"), 0)
   assert.equal(supportDirection("Increases the chance"), 1)
   assert.equal(supportDirection("Confirms"), 1)
-  // Current: one-directional, so nothing points against.
+  // Current: one anchor against, a neutral floor, three for.
+  assert.equal(supportDirection("Practically rejected"), -1)
   assert.equal(supportDirection("Did not support"), 0)
   assert.equal(supportDirection("Somewhat supported"), 1)
   assert.equal(supportDirection("Strongly supported"), 1)
