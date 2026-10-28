@@ -2,8 +2,9 @@
  * Rebuild consultations from the Box archive.
  *
  * Every archived consultation has a folder `<YYYY-MM-DD>_<encounterId>` holding
- * metadata.json, transcript.txt, raw_transcript.json, note_v<N>.md and, once a
- * stimulated recall was finished, recall_session.json (see archival/archive.ts).
+ * metadata.json, transcript.txt, raw_transcript.json, note_v<N>.md, the
+ * requested tests in test_requests.json and, once a stimulated recall was
+ * finished, recall_session.json (see archival/archive.ts).
  * That is enough to put the consultation back in the app. What the archive
  * lacks is re-derived or left out:
  * - the recall exchanges are detected again when the recall view opens;
@@ -17,7 +18,7 @@
  */
 
 import type { Encounter, EncounterMode, NoteVersion, NoteVersionSource } from "@storage/types"
-import { recallSessionFromArchive } from "@pipeline-errors"
+import { recallSessionFromArchive, testRequestsFromArchive } from "@pipeline-errors"
 import { transcriptFromDeepgramResponse } from "@transcription"
 import type { StorageClient } from "@/lib/archival"
 
@@ -102,6 +103,7 @@ export function encounterFromArchive(archived: ArchivedConsultation): Encounter 
   })
   const latest = noteVersions.at(-1)
   const approved = "note_approved.md" in files || meta.note?.approved === true
+  const testRequests = testRequestsFromArchive(parseJson<unknown>(files["test_requests.json"]))
 
   let confidence: Encounter["transcript_confidence"]
   const raw = parseJson<unknown>(files["raw_transcript.json"])
@@ -126,6 +128,9 @@ export function encounterFromArchive(archived: ArchivedConsultation): Encounter 
       ? { note_version: latest.version, note_versions: noteVersions, note_archive_status: "archived" as const }
       : {}),
     ...(approved ? { approval_status: "approved" as const, approved_at: archivedAt } : {}),
+    ...(testRequests?.length
+      ? { test_requests: testRequests, test_requests_archive_status: "archived" as const }
+      : {}),
     status: transcript ? "completed" : "transcription_failed",
     mode,
     language: meta.language || "en",
@@ -148,6 +153,7 @@ function isRecoveredFile(name: string): boolean {
     name === "raw_transcript.json" ||
     name === "note_approved.md" ||
     name === "recall_session.json" ||
+    name === "test_requests.json" ||
     NOTE_VERSION_PATTERN.test(name)
   )
 }

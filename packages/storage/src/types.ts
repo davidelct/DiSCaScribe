@@ -1,7 +1,8 @@
 import type { TranscriptWordSpan } from "../../pipeline/shared/src/transcript"
+import type { TestRequest } from "../../pipeline/shared/src/test-requests"
 import type { CodedEntry, CodedConcept } from "./terminology"
 
-export type { TranscriptWordSpan }
+export type { TranscriptWordSpan, TestRequest }
 export type { CodedEntry, CodedConcept }
 
 /**
@@ -180,6 +181,13 @@ export interface Encounter {
    * single-entry trail from those on the first new save.
    */
   note_versions?: NoteVersion[]
+  /**
+   * Tests the clinician requested during the consultation, in catalogue
+   * order (see TEST_CATALOGUE). Absent when none have been requested.
+   */
+  test_requests?: TestRequest[]
+  /** Archive state of the requests' copy (test_requests.json) in the storage backend. */
+  test_requests_archive_status?: NoteArchiveStatus
   /** Absent means "draft" (or no note yet). */
   approval_status?: ApprovalStatus
   /** ISO 8601 timestamp of approval, set when the note is filed. */

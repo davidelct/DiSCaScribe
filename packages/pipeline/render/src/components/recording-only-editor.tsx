@@ -10,6 +10,7 @@ import { format } from "date-fns"
 import { cn } from "@ui/lib/utils"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
+import { TestRequestsCard } from "./test-requests"
 import {
   CARD,
   CARD_BODY,
@@ -31,7 +32,8 @@ import type { NoteEditorProps } from "./note-editor"
  * the page opens, before, during and after the recording, and the recording
  * strip above it is the only addition. Nothing of the pipeline shows: no
  * stage strip and no transcript, which is still made and archived for
- * stimulated recall. The form keeps a draft as the clinician types (see
+ * stimulated recall. The tests card under the note is the same as the
+ * scribed arm's. The form keeps a draft as the clinician types (see
  * note-drafts.ts); Approve & file records it in the note trail and locks the
  * consultation, once the recording is in.
  */
@@ -69,6 +71,7 @@ export function RecordingOnlyEditor({
   backLink,
   onStartRecording,
   onUploadRecording,
+  onSaveTests,
 }: NoteEditorProps) {
   const approved = encounter.approval_status === "approved"
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
@@ -325,6 +328,13 @@ export function RecordingOnlyEditor({
               </div>
             )}
           </section>
+
+          <TestRequestsCard
+            requests={encounter.test_requests ?? []}
+            locked={approved}
+            archiveStatus={encounter.test_requests_archive_status}
+            onSave={onSaveTests}
+          />
         </div>
       </div>
     </div>

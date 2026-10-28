@@ -11,6 +11,8 @@
  *     note_v0.md           Claude-generated SOAP note (v0 = as generated)
  *     note_v<N>.md         each saved user edit lands as the next version
  *     metadata.json        structured sidecar tying it all together
+ *     test_requests.json   tests the clinician requested (written on its own,
+ *                          whenever the requests change; see archiveTestRequests)
  *
  * The two phases exist because the artifacts become available in different
  * requests, and on serverless the safe rule is "upload from the request that
@@ -353,4 +355,37 @@ export async function archiveNoteAndMetadata(input: ArchiveNoteInput): Promise<A
 
   present.add("metadata.json")
   return { folderId: containerId, folderUrl: client.containerUrl(containerId), files, artifacts: [...present] }
+}
+
+// ---------------------------------------------------------------------------
+// Test requests — the tests the clinician picked, uploaded whenever the
+// selection is saved (at any point in the consultation, recorded or not).
+// ---------------------------------------------------------------------------
+
+export interface ArchiveTestRequestsInput {
+  client: StorageClient
+  encounterId: string
+  /** Encounter creation timestamp; only the date is used (for the container name). */
+  createdAt: string
+  /** test_requests.json as built by buildTestRequestsArchive. */
+  document: unknown
+}
+
+/**
+ * Upload test_requests.json to the consultation's container, overwriting the
+ * prior copy: the file always holds the current selection, each request
+ * stamped with when it was made.
+ */
+export async function archiveTestRequests(input: ArchiveTestRequestsInput): Promise<TranscriptionArchiveResult> {
+  const { client } = input
+  const containerId = await client.ensureContainer(containerNameFor(input.createdAt, input.encounterId))
+  const existing = await client.listFiles(containerId)
+  await client.uploadFile(
+    containerId,
+    "test_requests.json",
+    Buffer.from(JSON.stringify(input.document, null, 2), "utf8"),
+    "application/json",
+    existing.get("test_requests.json")?.id,
+  )
+  return { folderId: containerId, folderUrl: client.containerUrl(containerId), uploaded: ["test_requests.json"] }
 }

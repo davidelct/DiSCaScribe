@@ -26,7 +26,13 @@ import {
   toPipelineError,
   type PipelineError,
 } from "@pipeline-errors"
-import type { Encounter, EncounterMode, MicrophoneProcessing, TranscriptWordSpan } from "@storage/types"
+import type {
+  Encounter,
+  EncounterMode,
+  MicrophoneProcessing,
+  TestRequest,
+  TranscriptWordSpan,
+} from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
 import { Button } from "@ui/lib/ui/button"
 import { NoteEditor } from "@note-rendering"
@@ -129,6 +135,27 @@ async function requestArchive(baseUrl: string, payload: ArchivePayload): Promise
   })
   if (!res.ok) {
     throw new Error(`Archive failed (${res.status})`)
+  }
+  return (await res.json()) as ArchiveResponse
+}
+
+/**
+ * Archive the consultation's test requests as test_requests.json in its
+ * container. Needs only the encounter's id and creation time, so it works
+ * before anything is recorded. Throws on a non-OK response.
+ */
+async function requestTestArchive(
+  baseUrl: string,
+  payload: { encounter_id: string; created_at: string; tests: TestRequest[] },
+): Promise<ArchiveResponse> {
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/archive/tests` : "/api/archive/tests"
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(`Test request archive failed (${res.status})`)
   }
   return (await res.json()) as ArchiveResponse
 }
@@ -1144,6 +1171,32 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
     archiveEncounter(enc.transcript_text, noteText, updates.note_version, false, source)
   }
 
+  // Test requests, in either arm and at any point until filing: the selection
+  // is stored on the consultation, then archived. Archive calls run one after
+  // another in the order the selections were saved, so a quick run of changes
+  // always leaves the latest one in the archive.
+  const testArchiveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const handleSaveTests = async (requests: TestRequest[]) => {
+    const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
+    if (!enc) return
+    await updateEncounter(encounterId, { test_requests: requests, test_requests_archive_status: "pending" })
+    testArchiveQueueRef.current = testArchiveQueueRef.current.then(async () => {
+      try {
+        const data = await requestTestArchive(apiBaseUrlRef.current, {
+          encounter_id: enc.id,
+          created_at: enc.created_at,
+          tests: requests,
+        })
+        await updateEncounterRef.current(encounterId, {
+          test_requests_archive_status: data.skipped ? "skipped" : "archived",
+        })
+      } catch (archiveError) {
+        debugError("Test request archive failed", archiveError)
+        await updateEncounterRef.current(encounterId, { test_requests_archive_status: "failed" })
+      }
+    })
+  }
+
   // Approve & file: record the approved version, lock the consultation, and
   // archive the filed note. From here the chart shows it as a filed entry.
   // The recording-only arm writes and files its note in one step, so a first
@@ -1275,6 +1328,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             onSave={handleSaveNote}
             onApprove={handleApproveNote}
             live={liveState}
+            onSaveTests={(requests) => void handleSaveTests(requests)}
             onStartRecording={() => void handleStartRecording()}
             onUploadRecording={(file) => void handleUploadRecording(file)}
             backLink={

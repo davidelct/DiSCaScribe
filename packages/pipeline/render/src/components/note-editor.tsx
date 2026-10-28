@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
-import type { Encounter, NoteVersion } from "@storage/types"
+import type { Encounter, NoteVersion, TestRequest } from "@storage/types"
 import { noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
@@ -13,6 +13,7 @@ import { NoteSkeleton } from "./note-skeleton"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
 import { RecordingOnlyEditor } from "./recording-only-editor"
+import { TestRequestsCard } from "./test-requests"
 import {
   CARD,
   CARD_BODY,
@@ -29,7 +30,8 @@ import { parseNoteSections, type NoteSection } from "../note-sections"
 
 /**
  * The consultation as one page that reads in the order things happen: the
- * audio, then the transcript, then the clinical note, stacked. A stage strip
+ * audio, then the transcript, then the clinical note, stacked, with the tests
+ * requested under the note. A stage strip
  * under the identity row says which of the three is done, live or drafting.
  * Nothing sits behind a tab: while the note drafts the transcript is there to
  * read above it. When the note lands, nothing moves under the clinician: the
@@ -79,6 +81,8 @@ export interface NoteEditorProps {
    */
   onStartRecording?: () => void
   onUploadRecording?: (file: File) => void
+  /** Replace the consultation's test requests (both arms, at any point until filing). */
+  onSaveTests: (requests: TestRequest[]) => void
 }
 
 type StageState = "pending" | "live" | "active" | "done" | "failed"
@@ -129,7 +133,7 @@ export function NoteEditor(props: NoteEditorProps) {
   return props.encounter.mode === "recording_only" ? <RecordingOnlyEditor {...props} /> : <ScribedNoteEditor {...props} />
 }
 
-function ScribedNoteEditor({ encounter, onSave, onApprove, live, backLink }: NoteEditorProps) {
+function ScribedNoteEditor({ encounter, onSave, onApprove, live, backLink, onSaveTests }: NoteEditorProps) {
   const approved = encounter.approval_status === "approved"
   const hasNote = Boolean(encounter.note_text?.trim())
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
@@ -546,6 +550,13 @@ function ScribedNoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
               </div>
             )}
           </section>
+
+          <TestRequestsCard
+            requests={encounter.test_requests ?? []}
+            locked={approved}
+            archiveStatus={encounter.test_requests_archive_status}
+            onSave={onSaveTests}
+          />
         </div>
       </div>
 
