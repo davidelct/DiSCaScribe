@@ -2,33 +2,29 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import type { Encounter, NoteVersion } from "@storage/types"
-import { isLinkedToPatient, noteVersionsOf } from "@storage"
+import { noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
-import { Badge } from "@ui/lib/ui/badge"
-import {
-  ArrowDown,
-  Save,
-  Check,
-  ChevronRight,
-  Loader2,
-  Pencil,
-  RotateCcw,
-  Square,
-  SquareCheck,
-  X,
-  FileCheck,
-  History,
-  ChevronDown,
-} from "lucide-react"
-import { format } from "date-fns"
+import { ArrowDown, Save, ChevronRight, Loader2, Pencil, Square, SquareCheck, X, FileCheck } from "lucide-react"
 import { cn } from "@ui/lib/utils"
-import { MarkdownNote } from "./markdown-note"
 import { TranscriptView } from "./transcript-view"
 import { TranscriptSkeleton } from "./transcript-skeleton"
 import { NoteSkeleton } from "./note-skeleton"
 import { AudioPlayer } from "./audio-player"
 import { RecordingBar } from "./recording-bar"
+import { RecordingOnlyEditor } from "./recording-only-editor"
+import {
+  CARD,
+  CARD_BODY,
+  CARD_HEAD,
+  CaptureErrorRow,
+  ConsultationHeader,
+  NoteVersionMenu,
+  SectionedNote,
+  ViewingVersionBanner,
+  emptySoapSections,
+  sectionsToMarkdown,
+} from "./note-parts"
 import { parseNoteSections, type NoteSection } from "../note-sections"
 
 /**
@@ -67,7 +63,7 @@ export interface LiveCaptureState {
   onRetryNoteGeneration?: () => void
 }
 
-interface NoteEditorProps {
+export interface NoteEditorProps {
   encounter: Encounter
   /** Persist an edit (or the first manual note) as the next version. */
   onSave: (noteText: string) => void
@@ -76,80 +72,13 @@ interface NoteEditorProps {
   live?: LiveCaptureState
   /** Navigation element rendered before the patient name (back to chart). */
   backLink?: ReactNode
-}
-
-const SOAP_TITLES = ["Subjective", "Objective", "Assessment", "Plan"]
-
-const VERSION_SOURCE_LABELS: Record<NoteVersion["source"], string> = {
-  generated: "AI draft",
-  manual: "Written by clinician",
-  edited: "Clinician edit",
-  approved: "Approved & filed",
-}
-
-/** Reassemble section bodies into the canonical SOAP markdown shape. */
-function sectionsToMarkdown(preamble: string, sections: NoteSection[]): string {
-  const body =
-    sections
-      .map((section) => (section.body.trim() ? `## ${section.title}\n\n${section.body.trim()}` : `## ${section.title}`))
-      .join("\n\n") + "\n"
-  return preamble.trim() ? `${preamble.trim()}\n\n${body}` : body
-}
-
-/** Empty four-section scaffold for a manually written note. */
-function emptySoapSections(): NoteSection[] {
-  return SOAP_TITLES.map((title) => ({ title, body: "" }))
-}
-
-/**
- * Renders the note as its level-2 (SOAP) sections. Falls back to plain
- * whole-note rendering when the note has no sections.
- */
-function SectionedNote({ source }: { source: string }) {
-  const { preamble, sections } = parseNoteSections(source)
-
-  if (sections.length === 0) {
-    return <MarkdownNote source={source} />
-  }
-
-  return (
-    <div className="[&>*+*]:mt-8">
-      {preamble && <MarkdownNote source={preamble} className="[&>*:first-child]:mt-0" />}
-      {sections.map((section) => (
-        <section key={section.title}>
-          <h2 className="mb-3 border-b border-border pb-2 font-display text-xl font-medium tracking-tight text-foreground">
-            {section.title}
-          </h2>
-          {section.body.trim() ? (
-            <MarkdownNote source={section.body} className="[&>*:first-child]:mt-0" />
-          ) : (
-            <p className="my-3 text-sm italic text-muted-foreground">Empty</p>
-          )}
-        </section>
-      ))}
-    </div>
-  )
-}
-
-/** A failed pipeline step, shown above the stages with its retry action. */
-function CaptureErrorRow({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-5 py-3">
-      <X className="h-4 w-4 shrink-0 text-destructive" />
-      <p className="min-w-0 flex-1 text-sm text-destructive">{message}</p>
-      {onRetry && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRetry}
-          className="h-8 shrink-0 rounded-md border-destructive/40 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        >
-          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-          <span className="text-xs">Retry</span>
-        </Button>
-      )}
-    </div>
-  )
+  /**
+   * Begin capture from the page itself. The recording-only arm opens on its
+   * note form rather than a ready panel, so its recording strip starts the
+   * recording (or takes a file) before anything has been captured.
+   */
+  onStartRecording?: () => void
+  onUploadRecording?: (file: File) => void
 }
 
 type StageState = "pending" | "live" | "active" | "done" | "failed"
@@ -192,17 +121,19 @@ function StageChip({ label, state }: { label: string; state: StageState }) {
   )
 }
 
-const CARD = "rounded-2xl border border-border bg-card shadow-soft"
-const CARD_HEAD = "flex min-h-8 flex-wrap items-center gap-2 px-5 py-3"
-const CARD_BODY = "border-t border-border px-5 py-4"
+/**
+ * The recording-only arm is laid out as an EHR's note form with a recording
+ * strip above it; the scribed arm is the pipeline view below.
+ */
+export function NoteEditor(props: NoteEditorProps) {
+  return props.encounter.mode === "recording_only" ? <RecordingOnlyEditor {...props} /> : <ScribedNoteEditor {...props} />
+}
 
-export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: NoteEditorProps) {
-  const recordingOnly = encounter.mode === "recording_only"
+function ScribedNoteEditor({ encounter, onSave, onApprove, live, backLink }: NoteEditorProps) {
   const approved = encounter.approval_status === "approved"
   const hasNote = Boolean(encounter.note_text?.trim())
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const versions = noteVersionsOf(encounter)
-  const linked = isLinkedToPatient(encounter)
 
   const [noteMode, setNoteMode] = useState<"preview" | "edit">("preview")
   const [noteMarkdown, setNoteMarkdown] = useState<string>(encounter.note_text || "")
@@ -214,7 +145,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   const [hasChanges, setHasChanges] = useState(false)
   // Read-only view of an older version from the trail; null = current note.
   const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null)
-  const [showHistory, setShowHistory] = useState(false)
   // The transcript starts open when it is the only thing to read, and starts
   // folded when the note already exists on open. It never folds by itself.
   const [transcriptOpen, setTranscriptOpen] = useState(!hasNote)
@@ -230,7 +160,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
     setHasChanges(false)
     setEditSections(null)
     setViewingVersion(null)
-    setShowHistory(false)
     setTranscriptOpen(!encounter.note_text?.trim())
     setNoteJustArrived(false)
     prevNoteRef.current = encounter.note_text || ""
@@ -276,8 +205,8 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
     setNoteJustArrived(false)
   }
 
-  // A note can be written by hand (recording-only arm, or a failed generation)
-  // once capture has finished and delivered a transcript.
+  // A note can be written by hand after a failed generation, once capture has
+  // finished and delivered a transcript.
   const noteEnabled = hasNote || (hasTranscript && !live)
 
   const noteVersionNumber = encounter.note_version ?? 0
@@ -300,7 +229,6 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
       setEditSections(sections)
     }
     setViewingVersion(null)
-    setShowHistory(false)
     setHasChanges(false)
     setNoteMode("edit")
   }
@@ -377,12 +305,10 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
   const transcriptCanOpen = hasTranscript || transcriptStage === "active"
   const showTranscriptBody = transcriptCanOpen && transcriptOpen
 
-  // In the scribed arm a note is on its way from the moment processing starts,
-  // so its shape shows while the transcript is still being made, not only
-  // once generation itself begins. Nothing is expected after a failure, or
-  // in the recording-only arm.
+  // A note is on its way from the moment processing starts, so its shape
+  // shows while the transcript is still being made, not only once generation
+  // itself begins. Nothing is expected after a failure.
   const noteExpected =
-    !recordingOnly &&
     !hasNote &&
     live?.phase === "processing" &&
     live.transcriptionStatus !== "failed" &&
@@ -435,9 +361,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
         <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
           <Pencil className="h-8 w-8 text-muted-foreground/40" />
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground text-balance">
-            {recordingOnly
-              ? "No note yet. Write the clinical note for this consultation yourself — the scribe stays out of it in this mode."
-              : "No note was generated. You can write the clinical note manually."}
+            No note was generated. You can write the clinical note manually.
           </p>
           <Button
             onClick={enterEditMode}
@@ -454,43 +378,15 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
 
   return (
     <div className="flex h-full flex-col">
-      {/* One row: back, who, the pipeline's state, and when on the right. */}
-      <div className="shrink-0 border-b border-border bg-card/60 px-6 backdrop-blur-sm">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
-          {backLink}
-          <h2
-            className={cn(
-              "font-display truncate text-base font-medium tracking-tight",
-              linked ? "text-foreground" : "italic text-muted-foreground",
-            )}
-          >
-            {linked ? encounter.patient_name || "Unknown Patient" : "Unregistered patient"}
-          </h2>
-          {approved && (
-            <Badge className="rounded-md border-success/30 bg-success/10 text-xs font-semibold text-success">
-              <FileCheck className="mr-1 h-3 w-3" />
-              Filed
-              {encounter.approved_at ? ` ${format(new Date(encounter.approved_at), "d MMM, HH:mm")}` : ""}
-            </Badge>
-          )}
-          <div className="ml-2 flex items-center gap-2.5">
-            <StageChip label="Recording" state={recordingStage} />
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
-            <StageChip label="Transcript" state={transcriptStage} />
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
-            <StageChip label="Clinical note" state={noteStage} />
-          </div>
-          <div className="ml-auto flex min-w-0 items-center gap-x-2 text-xs text-muted-foreground">
-            <span className="whitespace-nowrap">{format(new Date(encounter.created_at), "d MMM yyyy, HH:mm")}</span>
-            {encounter.visit_reason && (
-              <>
-                <span className="text-border">·</span>
-                <span className="truncate">{encounter.visit_reason}</span>
-              </>
-            )}
-          </div>
+      <ConsultationHeader encounter={encounter} backLink={backLink}>
+        <div className="ml-2 flex items-center gap-2.5">
+          <StageChip label="Recording" state={recordingStage} />
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+          <StageChip label="Transcript" state={transcriptStage} />
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+          <StageChip label="Clinical note" state={noteStage} />
         </div>
-      </div>
+      </ConsultationHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full flex-col gap-3 px-6 py-4">
@@ -514,7 +410,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
               onStop={live.onStop ?? (() => undefined)}
               onPause={live.onPause ?? (() => undefined)}
               onResume={live.onResume ?? (() => undefined)}
-              stopLabel={recordingOnly ? "Stop recording" : "Stop & generate"}
+              stopLabel="Stop & generate"
               className={cn(CARD, "px-5 py-3.5")}
             />
           ) : (
@@ -581,62 +477,16 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
                   </span>
                 )}
                 {hasNote && versions.length > 0 && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowHistory((v) => !v)}
-                      title={
-                        noteArchive === "pending"
-                          ? "Saving this version to the archive…"
-                          : noteArchive === "archived"
-                            ? "This version is saved to the archive"
-                            : noteArchive === "failed"
-                              ? "Archiving this version failed"
-                              : noteArchive === "skipped"
-                                ? "Archiving not configured — stored locally only"
-                                : "Note version history"
-                      }
-                      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <History className="h-3 w-3" />
-                      v{noteVersionNumber}
-                      {noteArchive === "pending" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
-                      {noteArchive === "archived" && <Check className="h-3 w-3 text-success" />}
-                      {noteArchive === "failed" && <X className="h-3 w-3 text-destructive" />}
-                      <ChevronDown className={cn("h-3 w-3 transition-transform", showHistory && "rotate-180")} />
-                    </button>
-                    {showHistory && (
-                      <div className="absolute right-0 top-9 z-20 w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lifted">
-                        {[...versions].reverse().map((version) => {
-                          const isCurrent = version.version === noteVersionNumber && !viewingVersion
-                          const isViewing = viewingVersion?.version === version.version
-                          return (
-                            <button
-                              key={version.version}
-                              type="button"
-                              onClick={() => {
-                                setViewingVersion(version.version === noteVersionNumber ? null : version)
-                                setShowHistory(false)
-                                setNoteMode("preview")
-                              }}
-                              className={cn(
-                                "flex w-full items-baseline gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
-                                (isCurrent || isViewing) && "bg-accent/60",
-                              )}
-                            >
-                              <span className="font-mono text-xs text-foreground">v{version.version}</span>
-                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                                {VERSION_SOURCE_LABELS[version.source]}
-                              </span>
-                              <span className="shrink-0 text-[0.65rem] text-muted-foreground/70">
-                                {format(new Date(version.created_at), "HH:mm")}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
+                  <NoteVersionMenu
+                    versions={versions}
+                    currentVersion={noteVersionNumber}
+                    archiveStatus={noteArchive}
+                    viewing={viewingVersion}
+                    onSelect={(version) => {
+                      setViewingVersion(version)
+                      setNoteMode("preview")
+                    }}
+                  />
                 )}
                 {showPreviewActions && (
                   <>
@@ -690,21 +540,7 @@ export function NoteEditor({ encounter, onSave, onApprove, live, backLink }: Not
             {noteBody && (
               <div className={CARD_BODY}>
                 {viewingVersion && (
-                  <div className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-accent/40 px-4 py-2.5">
-                    <History className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                      Viewing v{viewingVersion.version} · {VERSION_SOURCE_LABELS[viewingVersion.source]} ·{" "}
-                      {format(new Date(viewingVersion.created_at), "d MMM, HH:mm")} — read-only
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setViewingVersion(null)}
-                      className="h-8 shrink-0 rounded-md px-3"
-                    >
-                      <span className="text-xs">Back to latest</span>
-                    </Button>
-                  </div>
+                  <ViewingVersionBanner version={viewingVersion} onBack={() => setViewingVersion(null)} />
                 )}
                 {noteBody}
               </div>

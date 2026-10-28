@@ -11,7 +11,8 @@
  * consultations tab (mode + reason chosen there; the latter may leave it
  * untied from any patient); this page starts in a ready state (record or
  * upload), runs the capture pipeline, and hands the result to the note editor
- * for editing and approval. Approving files the note back to the patient's
+ * for editing and approval. The recording-only arm skips the ready state: its
+ * note form is open from the start and the recording runs beside it. Approving files the note back to the patient's
  * chart, or just to the consultations list when there is no patient.
  */
 
@@ -132,18 +133,19 @@ async function requestArchive(baseUrl: string, payload: ArchivePayload): Promise
   return (await res.json()) as ArchiveResponse
 }
 
-/** Pre-capture state: record the consultation live, or transcribe a file. */
+/**
+ * Pre-capture state in the scribed arm: record the consultation live, or
+ * transcribe a file. The recording-only arm has none; its note form opens
+ * straight away and its recording strip starts the capture.
+ */
 function ReadyPanel({
-  encounter,
   onRecord,
   onUpload,
 }: {
-  encounter: Encounter
   onRecord: () => void
   onUpload: (file: File) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const recordingOnly = encounter.mode === "recording_only"
 
   return (
     <div className="flex h-full items-center justify-center p-8">
@@ -153,9 +155,7 @@ function ReadyPanel({
         </span>
         <h2 className="mt-5 font-display text-2xl font-medium tracking-tight text-foreground">Ready to record</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {recordingOnly
-            ? "The consultation is recorded and transcribed; you write the clinical note afterwards."
-            : "The consultation is recorded and transcribed, and the scribe drafts the clinical note for your review."}
+          The consultation is recorded and transcribed, and the scribe drafts the clinical note for your review.
         </p>
         <Button
           onClick={onRecord}
@@ -488,6 +488,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   /**
    * Recording-only mode: the consultation is transcribed and archived for the
    * study's stimulated-recall layer; the clinician writes the note manually.
+   * The note may already be filed (after a failed transcription was retried),
+   * so it goes with the transcript to keep the manifest's note entry.
    */
   const completeRecordingOnlyEncounter = useCallback(
     async (transcript: string) => {
@@ -496,7 +498,13 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
       await refreshRef.current()
       setWorkflowError(null)
       setLive(null)
-      archiveEncounter(transcript)
+      const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
+      const latest = enc ? noteVersionsOf(enc).at(-1) : undefined
+      if (enc && latest) {
+        archiveEncounter(transcript, enc.note_text, latest.version, enc.approval_status === "approved", latest.source)
+      } else {
+        archiveEncounter(transcript)
+      }
     },
     [archiveEncounter, encounterId],
   )
@@ -1126,8 +1134,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   }
 
   // Saving an edit records the next version in the note trail; the very first
-  // manual save (recording-only arm, or after a failed generation) is v0 with
-  // source "manual".
+  // manual save (after a failed generation) is v0 with source "manual".
   const handleSaveNote = async (noteText: string) => {
     const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
     if (!enc) return
@@ -1139,10 +1146,13 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
 
   // Approve & file: record the approved version, lock the consultation, and
   // archive the filed note. From here the chart shows it as a filed entry.
+  // The recording-only arm writes and files its note in one step, so a first
+  // filing there records the clinician's note as v0 ("manual"), filed.
   const handleApproveNote = async (noteText: string) => {
     const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
     if (!enc) return
-    const updates = appendNoteVersion(enc, "approved", noteText)
+    const source = enc.mode === "recording_only" && noteVersionsOf(enc).length === 0 ? "manual" : "approved"
+    const updates = appendNoteVersion(enc, source, noteText)
     const approvedAt = new Date().toISOString()
     await updateEncounter(encounterId, {
       ...updates,
@@ -1156,7 +1166,7 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
       success: true,
       metadata: { note_version: updates.note_version },
     })
-    archiveEncounter(enc.transcript_text, noteText, updates.note_version, true, "approved")
+    archiveEncounter(enc.transcript_text, noteText, updates.note_version, true, source)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1188,13 +1198,17 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   const back = patient
     ? { href: `/patients/${patient.id}`, label: `${encounter.patient_name}'s chart` }
     : { href: "/consultations", label: "Consultations" }
+  const recordingOnly = encounter.mode === "recording_only"
   const hasTranscript = Boolean(encounter.transcript_text?.trim())
   const hasNote = Boolean(encounter.note_text?.trim())
   // A consultation that was recorded but never transcribed (a failed run, or
   // a page closed mid-upload) still has its recording: offer that, not a
-  // fresh start that would record over it.
-  const untranscribedRecording = !live && !hasTranscript && !hasNote && Boolean(encounter.recording_duration)
-  const showReady = !live && !hasTranscript && !hasNote && !untranscribedRecording
+  // fresh start that would record over it. In the recording-only arm the
+  // note can be filed before the transcript is in, so a note says nothing
+  // about the recording there.
+  const untranscribedRecording =
+    !live && !hasTranscript && (recordingOnly || !hasNote) && Boolean(encounter.recording_duration)
+  const showReady = !recordingOnly && !live && !hasTranscript && !hasNote && !untranscribedRecording
 
   const liveState =
     live === "recording"
@@ -1251,7 +1265,6 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
               </Link>
             </div>
             <ReadyPanel
-              encounter={encounter}
               onRecord={() => void handleStartRecording()}
               onUpload={(file) => void handleUploadRecording(file)}
             />
@@ -1262,6 +1275,8 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             onSave={handleSaveNote}
             onApprove={handleApproveNote}
             live={liveState}
+            onStartRecording={() => void handleStartRecording()}
+            onUploadRecording={(file) => void handleUploadRecording(file)}
             backLink={
               <Link
                 href={back.href}
