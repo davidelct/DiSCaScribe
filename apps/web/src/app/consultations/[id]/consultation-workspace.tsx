@@ -31,6 +31,7 @@ import type {
   EncounterMode,
   MicrophoneProcessing,
   TestRequest,
+  ImagingRequestForm,
   TranscriptWordSpan,
 } from "@storage/types"
 import { ErrorBoundary, PermissionsDialog, useEncounters, useHttpsWarning } from "@ui"
@@ -146,7 +147,7 @@ async function requestArchive(baseUrl: string, payload: ArchivePayload): Promise
  */
 async function requestTestArchive(
   baseUrl: string,
-  payload: { encounter_id: string; created_at: string; tests: TestRequest[] },
+  payload: { encounter_id: string; created_at: string; tests: TestRequest[]; clinical_indication: string; imaging_form: ImagingRequestForm | null },
 ): Promise<ArchiveResponse> {
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/archive/tests` : "/api/archive/tests"
   const res = await fetch(url, {
@@ -1172,20 +1173,32 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
   }
 
   // Test requests, in either arm and at any point until filing: the selection
-  // is stored on the consultation, then archived. Archive calls run one after
+  // with the blood tests' clinical indication and the imaging request form are
+  // stored on the consultation, then archived. Archive calls run one after
   // another in the order the selections were saved, so a quick run of changes
   // always leaves the latest one in the archive.
   const testArchiveQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const handleSaveTests = async (requests: TestRequest[]) => {
+  const handleSaveTests = async (
+    requests: TestRequest[],
+    clinicalIndication: string,
+    imagingForm: ImagingRequestForm | null,
+  ) => {
     const enc = encountersRef.current.find((e: Encounter) => e.id === encounterId)
     if (!enc) return
-    await updateEncounter(encounterId, { test_requests: requests, test_requests_archive_status: "pending" })
+    await updateEncounter(encounterId, {
+      test_requests: requests,
+      test_clinical_indication: clinicalIndication,
+      imaging_request_form: imagingForm,
+      test_requests_archive_status: "pending",
+    })
     testArchiveQueueRef.current = testArchiveQueueRef.current.then(async () => {
       try {
         const data = await requestTestArchive(apiBaseUrlRef.current, {
           encounter_id: enc.id,
           created_at: enc.created_at,
           tests: requests,
+          clinical_indication: clinicalIndication,
+          imaging_form: imagingForm,
         })
         await updateEncounterRef.current(encounterId, {
           test_requests_archive_status: data.skipped ? "skipped" : "archived",
@@ -1328,7 +1341,9 @@ function ConsultationWorkspaceContent({ encounterId }: { encounterId: string }) 
             onSave={handleSaveNote}
             onApprove={handleApproveNote}
             live={liveState}
-            onSaveTests={(requests) => void handleSaveTests(requests)}
+            onSaveTests={(requests, clinicalIndication, imagingForm) =>
+              void handleSaveTests(requests, clinicalIndication, imagingForm)
+            }
             onStartRecording={() => void handleStartRecording()}
             onUploadRecording={(file) => void handleUploadRecording(file)}
             backLink={

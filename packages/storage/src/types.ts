@@ -1,8 +1,8 @@
 import type { TranscriptWordSpan } from "../../pipeline/shared/src/transcript"
-import type { TestRequest } from "../../pipeline/shared/src/test-requests"
+import type { ImagingRequestForm, TestRequest } from "../../pipeline/shared/src/test-requests"
 import type { CodedEntry, CodedConcept } from "./terminology"
 
-export type { TranscriptWordSpan, TestRequest }
+export type { TranscriptWordSpan, TestRequest, ImagingRequestForm }
 export type { CodedEntry, CodedConcept }
 
 /**
@@ -183,9 +183,17 @@ export interface Encounter {
   note_versions?: NoteVersion[]
   /**
    * Tests the clinician requested during the consultation, in catalogue
-   * order (see TEST_CATALOGUE). Absent when none have been requested.
+   * order, blood tests then imaging (see REQUEST_CATALOGUE). Absent when
+   * none have been requested.
    */
   test_requests?: TestRequest[]
+  /**
+   * The clinician's brief justification for the requested blood tests, one
+   * for the whole batch, as a GP system asks for it. Absent when none was given.
+   */
+  test_clinical_indication?: string
+  /** The request form for the imaging among the requests. Absent or null when no imaging is requested. */
+  imaging_request_form?: ImagingRequestForm | null
   /** Archive state of the requests' copy (test_requests.json) in the storage backend. */
   test_requests_archive_status?: NoteArchiveStatus
   /** Absent means "draft" (or no note yet). */

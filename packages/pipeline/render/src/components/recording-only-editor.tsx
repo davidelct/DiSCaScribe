@@ -331,6 +331,8 @@ export function RecordingOnlyEditor({
 
           <TestRequestsCard
             requests={encounter.test_requests ?? []}
+            clinicalIndication={encounter.test_clinical_indication ?? ""}
+            imagingForm={encounter.imaging_request_form ?? null}
             locked={approved}
             archiveStatus={encounter.test_requests_archive_status}
             onSave={onSaveTests}

@@ -18,7 +18,7 @@
  */
 
 import type { Encounter, EncounterMode, NoteVersion, NoteVersionSource } from "@storage/types"
-import { recallSessionFromArchive, testRequestsFromArchive } from "@pipeline-errors"
+import { clinicalIndicationFromArchive, imagingFormFromArchive, recallSessionFromArchive, testRequestsFromArchive } from "@pipeline-errors"
 import { transcriptFromDeepgramResponse } from "@transcription"
 import type { StorageClient } from "@/lib/archival"
 
@@ -103,7 +103,10 @@ export function encounterFromArchive(archived: ArchivedConsultation): Encounter 
   })
   const latest = noteVersions.at(-1)
   const approved = "note_approved.md" in files || meta.note?.approved === true
-  const testRequests = testRequestsFromArchive(parseJson<unknown>(files["test_requests.json"]))
+  const testRequestsFile = parseJson<unknown>(files["test_requests.json"])
+  const testRequests = testRequestsFromArchive(testRequestsFile)
+  const clinicalIndication = clinicalIndicationFromArchive(testRequestsFile)
+  const imagingForm = imagingFormFromArchive(testRequestsFile)
 
   let confidence: Encounter["transcript_confidence"]
   const raw = parseJson<unknown>(files["raw_transcript.json"])
@@ -129,7 +132,12 @@ export function encounterFromArchive(archived: ArchivedConsultation): Encounter 
       : {}),
     ...(approved ? { approval_status: "approved" as const, approved_at: archivedAt } : {}),
     ...(testRequests?.length
-      ? { test_requests: testRequests, test_requests_archive_status: "archived" as const }
+      ? {
+          test_requests: testRequests,
+          ...(clinicalIndication ? { test_clinical_indication: clinicalIndication } : {}),
+          ...(imagingForm ? { imaging_request_form: imagingForm } : {}),
+          test_requests_archive_status: "archived" as const,
+        }
       : {}),
     status: transcript ? "completed" : "transcription_failed",
     mode,

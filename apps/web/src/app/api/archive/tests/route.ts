@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server"
 import { writeAuditEntry } from "@storage/audit-log"
-import { buildTestRequestsArchive, parseTestRequests } from "@pipeline-errors"
+import { buildTestRequestsArchive, parseClinicalIndication, parseImagingForm, parseTestRequests } from "@pipeline-errors"
 import { archiveTestRequests, getArchivalConfig } from "@/lib/archival"
 import { requestSessionRole } from "@/lib/request-keys"
 
@@ -17,14 +17,17 @@ function jsonError(status: number, code: string, message: string) {
  * Archive the tests requested in a consultation to its container as
  * test_requests.json. JSON body:
  * - encounter_id, created_at — locate the consultation's container
- * - tests — the current requests (an empty list records that none remain)
+ * - tests — the current requests, blood tests and imaging alike (an empty
+ *   list records that none remain)
+ * - clinical_indication — the clinician's justification for the blood tests (optional)
+ * - imaging_form — the request form for the imaging (optional)
  * When archiving is not configured the route is a graceful no-op
  * (`{ skipped: true }`) so requesting tests never breaks.
  */
 export async function POST(req: NextRequest) {
   let encounterId = ""
   try {
-    let body: { encounter_id?: unknown; created_at?: unknown; tests?: unknown }
+    let body: { encounter_id?: unknown; created_at?: unknown; tests?: unknown; clinical_indication?: unknown; imaging_form?: unknown }
     try {
       body = (await req.json()) as typeof body
     } catch {
@@ -38,6 +41,8 @@ export async function POST(req: NextRequest) {
     if (!tests) {
       return jsonError(400, "validation_error", "tests must be a list of requests")
     }
+    const clinicalIndication = parseClinicalIndication(body.clinical_indication)
+    const imagingForm = parseImagingForm(body.imaging_form)
 
     const role = await requestSessionRole(req)
     if (!role) {
@@ -54,7 +59,7 @@ export async function POST(req: NextRequest) {
       client: archival.client,
       encounterId,
       createdAt: typeof body.created_at === "string" ? body.created_at : "",
-      document: buildTestRequestsArchive(encounterId, tests, new Date().toISOString()),
+      document: buildTestRequestsArchive(encounterId, tests, new Date().toISOString(), clinicalIndication, imagingForm),
     })
 
     await writeAuditEntry({
@@ -67,6 +72,9 @@ export async function POST(req: NextRequest) {
         files: result.uploaded,
         artifact_kind: "test_requests",
         test_count: tests.length,
+        imaging_count: tests.filter((request) => request.kind === "imaging").length,
+        has_clinical_indication: clinicalIndication.length > 0,
+        has_imaging_form: imagingForm !== null,
       },
     })
 

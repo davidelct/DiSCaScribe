@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
-import type { Encounter, NoteVersion, TestRequest } from "@storage/types"
+import type { Encounter, ImagingRequestForm, NoteVersion, TestRequest } from "@storage/types"
 import { noteVersionsOf } from "@storage"
 import { Button } from "@ui/lib/ui/button"
 import { Textarea } from "@ui/lib/ui/textarea"
@@ -81,8 +81,11 @@ export interface NoteEditorProps {
    */
   onStartRecording?: () => void
   onUploadRecording?: (file: File) => void
-  /** Replace the consultation's test requests (both arms, at any point until filing). */
-  onSaveTests: (requests: TestRequest[]) => void
+  /**
+   * Replace the consultation's requests, the blood tests' clinical indication
+   * and the imaging request form (both arms, at any point until filing).
+   */
+  onSaveTests: (requests: TestRequest[], clinicalIndication: string, imagingForm: ImagingRequestForm | null) => void
 }
 
 type StageState = "pending" | "live" | "active" | "done" | "failed"
@@ -553,6 +556,8 @@ function ScribedNoteEditor({ encounter, onSave, onApprove, live, backLink, onSav
 
           <TestRequestsCard
             requests={encounter.test_requests ?? []}
+            clinicalIndication={encounter.test_clinical_indication ?? ""}
+            imagingForm={encounter.imaging_request_form ?? null}
             locked={approved}
             archiveStatus={encounter.test_requests_archive_status}
             onSave={onSaveTests}
